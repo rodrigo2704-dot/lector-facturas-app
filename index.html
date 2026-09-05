@@ -1,0 +1,2929 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-50">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lector de Facturas & Cotejo con Catálogo IA</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- PDF.js para renderizar páginas de PDF en el navegador -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- SheetJS para exportar a Excel -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              800: '#075985',
+              900: '#0c4a6e'
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .tab-active { border-bottom-color: #0284c7; color: #0284c7; font-weight: 600; }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans text-slate-800 antialiased selection:bg-brand-500 selection:text-white">
+
+  <!-- HEADER SUPERIOR -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <!-- Logo y Título -->
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-700 to-sky-500 flex items-center justify-center text-white shadow-md shadow-sky-500/20">
+            <i data-lucide="receipt-text" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h1 class="text-base font-bold text-slate-900 leading-tight flex items-center gap-2">
+              Lector de Facturas & Cotejo IA
+              <span class="text-[10px] bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full font-semibold">Gemini 3.5 Flash Lite</span>
+            </h1>
+            <p class="text-xs text-slate-500 flex items-center gap-1.5">
+              <span>Catálogo:</span>
+              <span id="headerCatalogCount" class="font-semibold text-slate-700">Cargando catálogo...</span>
+              <button onclick="fetchCatalog(true)" title="Recargar catálogo desde Excel" class="text-slate-400 hover:text-brand-600 transition">
+                <i data-lucide="refresh-cw" class="w-3 h-3 inline"></i>
+              </button>
+            </p>
+          </div>
+        </div>
+
+        <!-- Conmutador de Clave de IA & Ajustes -->
+        <div class="flex items-center space-x-4">
+          <div class="bg-slate-100 p-1 rounded-xl flex items-center border border-slate-200 text-xs shadow-inner">
+            <button id="btnKeyGratuita" onclick="selectApiKeyMode('gratuita')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition bg-white shadow-xs text-emerald-700">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Clave Gratuita</span>
+            </button>
+            <button id="btnKeyPaga" onclick="selectApiKeyMode('paga')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition text-slate-600 hover:text-slate-900">
+              <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+              <span>Clave Paga (Resguardo)</span>
+            </button>
+          </div>
+
+          <button onclick="openApiKeyModal()" class="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition" title="Configurar / Ver Claves">
+            <i data-lucide="key-round" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Barra de Pestañas -->
+      <nav class="flex space-x-8 -mb-px overflow-x-auto text-sm border-t border-slate-100">
+        <button onclick="switchTab('scanner')" id="tab-scanner" class="py-3 px-1 border-b-2 border-transparent text-slate-500 hover:text-slate-700 flex items-center gap-2 transition tab-active">
+          <i data-lucide="scan-text" class="w-4 h-4"></i>
+          <span>Cargar & Cotejar Factura</span>
+        </button>
+        <button onclick="switchTab('catalog')" id="tab-catalog" class="py-3 px-1 border-b-2 border-transparent text-slate-500 hover:text-slate-700 flex items-center gap-2 transition">
+          <i data-lucide="book-marked" class="w-4 h-4"></i>
+          <span>Catálogo Maestro (<span id="tabCatalogBadge">1.370</span>)</span>
+        </button>
+        <button onclick="switchTab('history')" id="tab-history" class="py-3 px-1 border-b-2 border-transparent text-slate-500 hover:text-slate-700 flex items-center gap-2 transition">
+          <i data-lucide="help-circle" class="w-4 h-4 text-amber-600"></i>
+          <span>Artículos No Encontrados (<span id="tabUnfoundBadge">0</span>)</span>
+        </button>
+        <button onclick="switchTab('logs')" id="tab-logs" class="py-3 px-1 border-b-2 border-transparent text-slate-500 hover:text-slate-700 flex items-center gap-2 transition">
+          <i data-lucide="activity" class="w-4 h-4"></i>
+          <span>Registro de Uso IA</span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- CONTENIDO PRINCIPAL -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+
+    <!-- 1. PESTAÑA: CARGAR Y COTEJAR FACTURA (GEMINI IA) -->
+    <div id="view-scanner" class="space-y-6">
+
+      <!-- Zona de carga de comprobante -->
+      <div id="uploadSection" class="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+        <div class="max-w-2xl mx-auto text-center">
+          <div class="w-14 h-14 mx-auto rounded-2xl bg-sky-50 text-brand-600 flex items-center justify-center mb-4">
+            <i data-lucide="upload-cloud" class="w-7 h-7"></i>
+          </div>
+          <h2 class="text-lg font-bold text-slate-900">Cargar Factura o Remito</h2>
+          <p class="text-sm text-slate-500 mt-1">
+            Sube un archivo PDF o imagen (JPG, PNG). Gemini leerá todos los conceptos comprados y los cotejará en vivo contra tu catálogo de artículos.
+          </p>
+
+          <!-- Dropzone -->
+          <div id="dropZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)"
+               class="mt-6 border-2 border-dashed border-slate-300 hover:border-brand-500 rounded-2xl p-8 cursor-pointer bg-slate-50/60 hover:bg-sky-50/40 transition flex flex-col items-center justify-center">
+            <input type="file" id="fileInput" accept=".pdf,image/png,image/jpeg,image/webp" class="hidden" onchange="handleFileSelect(event)">
+            <i data-lucide="file-spreadsheet" class="w-10 h-10 text-slate-400 mb-2"></i>
+            <p class="text-sm font-semibold text-slate-700">Arrastra aquí el comprobante o haz clic para examinar</p>
+            <p class="text-xs text-slate-400 mt-1">Soporta PDF multipágina, JPG, PNG (hasta 25 MB)</p>
+            <button type="button" onclick="document.getElementById('fileInput').click()" class="mt-4 px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl shadow-xs transition">
+              Seleccionar Archivo
+            </button>
+          </div>
+
+          <!-- Archivo seleccionado badge -->
+          <div id="fileSelectedBox" class="hidden mt-4 p-4 bg-brand-50 border border-brand-200 rounded-xl flex items-center justify-between text-left">
+            <div class="flex items-center space-x-3 overflow-hidden">
+              <div class="p-2 bg-brand-500 text-white rounded-lg">
+                <i id="fileTypeIcon" data-lucide="file-text" class="w-5 h-5"></i>
+              </div>
+              <div class="truncate">
+                <p id="selectedFileName" class="text-sm font-bold text-slate-900 truncate">factura.pdf</p>
+                <p id="selectedFileSize" class="text-xs text-slate-500">1.2 MB</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="clearSelectedFile()" class="p-2 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition" title="Quitar archivo">
+                <i data-lucide="trash-2" class="w-4 h-4"></i>
+              </button>
+              <button id="btnProcessInvoice" onclick="processInvoiceWithGemini()" class="px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs rounded-xl shadow-sm hover:shadow flex items-center gap-2 transition">
+                <i data-lucide="sparkles" class="w-4 h-4"></i>
+                <span>Procesar con IA</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Estado de Procesamiento / Loading Bar -->
+      <div id="processingCard" class="hidden bg-white rounded-2xl border border-slate-200 p-8 shadow-xs text-center">
+        <div class="max-w-md mx-auto space-y-4">
+          <div class="w-12 h-12 mx-auto rounded-full bg-brand-50 text-brand-600 flex items-center justify-center animate-spin">
+            <i data-lucide="loader-2" class="w-6 h-6"></i>
+          </div>
+          <h3 id="processingStatusTitle" class="text-base font-bold text-slate-900">Analizando Factura con Gemini...</h3>
+          <p id="processingStatusDesc" class="text-xs text-slate-500">Inyectando catálogo de 1.370 artículos y cotejando conceptos...</p>
+          <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div id="processingProgressBar" class="bg-brand-500 h-2 rounded-full w-1/3 animate-pulse transition-all duration-300"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RESULTADOS DUAL: VISOR A LA IZQUIERDA Y TABLA COTEJADA A LA DERECHA -->
+      <div id="resultsSection" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        
+        <!-- Columna Izquierda: Visor del Documento -->
+        <div class="lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col sticky top-24 max-h-[85vh]">
+          <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+            <h3 class="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="eye" class="w-4 h-4 text-slate-500"></i>
+              <span>Vista del Comprobante</span>
+            </h3>
+            <div id="pdfControls" class="hidden flex items-center gap-2 text-xs">
+              <button onclick="prevPdfPage()" class="p-1 hover:bg-slate-100 rounded text-slate-600">
+                <i data-lucide="chevron-left" class="w-4 h-4"></i>
+              </button>
+              <span id="pdfPageNum" class="font-medium text-slate-700">1 / 1</span>
+              <button onclick="nextPdfPage()" class="p-1 hover:bg-slate-100 rounded text-slate-600">
+                <i data-lucide="chevron-right" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-auto flex items-center justify-center bg-slate-900 rounded-xl p-2 min-h-[350px]">
+            <canvas id="pdfCanvas" class="max-w-full max-h-full object-contain rounded shadow hidden"></canvas>
+            <img id="imgPreview" class="max-w-full max-h-full object-contain rounded shadow hidden" alt="Vista previa de factura">
+          </div>
+        </div>
+
+        <!-- Columna Derecha: Datos de la Factura y Renglones Cotejados -->
+        <div class="lg:col-span-7 space-y-6">
+
+          <!-- Tarjeta Cabecera de Factura -->
+          <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
+            <div class="flex items-start justify-between">
+              <div>
+                <span id="resTipoComprobante" class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-brand-100 text-brand-700">Factura</span>
+                <h2 id="resProveedor" class="text-lg font-extrabold text-slate-900 mt-1">Proveedor Detectado</h2>
+                <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mt-1">
+                  <span>CUIT: <strong id="resCuit" class="text-slate-700">-</strong></span>
+                  <span>N°: <strong id="resNumero" class="text-slate-700">-</strong></span>
+                  <span>Fecha: <strong id="resFecha" class="text-slate-700">-</strong></span>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="text-xs text-slate-500">Total Detectado</span>
+                <p id="resTotal" class="text-2xl font-black text-slate-900">$0.00</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Filtros de Renglones & Acciones -->
+          <div class="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
+            <div class="flex items-center gap-1.5 text-xs">
+              <button onclick="filterItems('all')" id="btnFilterAll" class="px-2.5 py-1 rounded-lg font-medium bg-slate-200 text-slate-800">
+                Todos (<span id="cntAll">0</span>)
+              </button>
+              <button onclick="filterItems('exact')" id="btnFilterExact" class="px-2.5 py-1 rounded-lg font-medium text-emerald-700 hover:bg-emerald-50">
+                🟢 Coincidencia (<span id="cntExact">0</span>)
+              </button>
+              <button onclick="filterItems('doubt')" id="btnFilterDoubt" class="px-2.5 py-1 rounded-lg font-medium text-amber-700 hover:bg-amber-50">
+                🟡 Con Opciones (<span id="cntDoubt">0</span>)
+              </button>
+              <button onclick="filterItems('none')" id="btnFilterNone" class="px-2.5 py-1 rounded-lg font-medium text-rose-700 hover:bg-rose-50">
+                🔴 Sin Catálogo (<span id="cntNone">0</span>)
+              </button>
+            </div>
+
+            <!-- Botones de Acción -->
+            <div class="flex items-center gap-2">
+              <button onclick="saveCurrentInvoiceToHistory()" class="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition">
+                <i data-lucide="save" class="w-3.5 h-3.5"></i>
+                <span>Guardar</span>
+              </button>
+              <button onclick="exportCurrentInvoiceToExcel()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition">
+                <i data-lucide="file-spreadsheet" class="w-3.5 h-3.5"></i>
+                <span>Excel</span>
+              </button>
+              <button onclick="openTangoFloatingModal()" id="btnMostrarTango" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition" title="Abrir ventana flotante con artículos vinculados para cargar en Tango">
+                <i data-lucide="layout-list" class="w-3.5 h-3.5"></i>
+                <span>Mostrar</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Lista de Artículos Extraídos y Cotejados -->
+          <div id="itemsContainer" class="space-y-3">
+            <!-- Renglones inyectados dinámicamente -->
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- 2. PESTAÑA: CATÁLOGO MAESTRO (1.370 ARTÍCULOS) -->
+    <div id="view-catalog" class="hidden space-y-6">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-100">
+          <div>
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+              Catálogo Maestro de Artículos
+              <span id="catalogTotalBadge" class="text-xs bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full font-semibold">1.370 artículos</span>
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Sincronizado directamente desde <code class="bg-slate-100 px-1 py-0.5 rounded text-slate-700">Catalogo de Articulos.xlsx</code>
+            </p>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="relative">
+              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+              <input type="text" id="catalogSearchInput" oninput="filterCatalogTable()" placeholder="Buscar por código, descripción o sinónimo..." 
+                     class="pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs w-72 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+            </div>
+            <!-- Botón Editar en General (Modo Edición en Tabla) -->
+            <button id="btnToggleCatalogEdit" onclick="toggleCatalogEditMode()" class="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs" title="Habilitar edición directa sobre todas las celdas de la tabla">
+              <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+              <span>Editar en General</span>
+            </button>
+
+            <!-- Acciones activas durante el Modo Edición -->
+            <div id="catalogEditActions" class="hidden flex items-center gap-2">
+              <button onclick="saveBulkCatalogEdits()" id="btnSaveBulkEdits" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs">
+                <i data-lucide="save" class="w-3.5 h-3.5"></i>
+                <span>Guardar Cambios</span>
+                <span id="badgePendingEdits" class="ml-1 px-1.5 py-0.5 bg-white text-emerald-800 rounded-full text-[10px] font-extrabold hidden">0</span>
+              </button>
+              <button onclick="cancelCatalogEditMode()" class="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold rounded-xl flex items-center gap-1 transition">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                <span>Cancelar</span>
+              </button>
+            </div>
+
+            <button id="btnCatalogNewItem" onclick="openCatalogEditModal(null)" class="px-3 py-2 bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition shadow-xs">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+              <span>Nuevo Artículo</span>
+            </button>
+            <button onclick="downloadCatalogExcel()" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition shadow-xs" title="Descargar Catalogo de Articulos.xlsx actualizado con 100% de sinónimos">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i>
+              <span>Descargar Excel</span>
+            </button>
+            <button onclick="fetchCatalog(true)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+              <span>Recargar</span>
+            </button>
+            <button onclick="document.getElementById('inputTangoRawCatalog').click()" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition shadow-xs" title="Actualizar catálogo comparando con una nueva exportación cruda de Tango Gestión">
+              <i data-lucide="file-up" class="w-3.5 h-3.5"></i>
+              <span>Actualizar con nueva tabla</span>
+            </button>
+            <input type="file" id="inputTangoRawCatalog" accept=".xlsx, .xls" class="hidden" onchange="handleTangoCatalogFileSelect(event)">
+          </div>
+        </div>
+
+        <!-- Banner Informativo de Modo Edición en General -->
+        <div id="catalogEditBanner" class="hidden mt-3 p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-center justify-between text-xs text-amber-900">
+          <div class="flex items-center gap-2">
+            <i data-lucide="edit-3" class="w-4 h-4 text-amber-600 shrink-0"></i>
+            <div>
+              <span class="font-bold">Modo Edición en General Activo:</span>
+              <span>Puedes editar directamente Código, Descripción Principal, Adicional y Sinónimos en la tabla. Al terminar, presiona <strong>"Guardar Cambios"</strong> para actualizar <code>Catalogo de Articulos.xlsx</code>.</span>
+            </div>
+          </div>
+          <span id="catalogEditCounterText" class="text-xs font-bold text-amber-800 bg-amber-200/80 px-2.5 py-1 rounded-lg shrink-0">0 modificaciones</span>
+        </div>
+
+        <!-- Tabla de Catálogo -->
+        <div class="mt-4 overflow-x-auto max-h-[600px]">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-500 sticky top-0 uppercase tracking-wider font-semibold border-b border-slate-200">
+              <tr>
+                <th class="py-2.5 px-3">Código</th>
+                <th class="py-2.5 px-3">Descripción Principal</th>
+                <th class="py-2.5 px-3">Descripción Adicional</th>
+                <th class="py-2.5 px-3">Sinónimo</th>
+                <th class="py-2.5 px-3 text-right">Acción</th>
+              </tr>
+            </thead>
+            <tbody id="catalogTableBody" class="divide-y divide-slate-100 font-mono text-[11px]">
+              <!-- Filas inyectadas dinámicamente -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. PESTAÑA: ARTÍCULOS NO ENCONTRADOS (REGISTRO PARA TANGO) -->
+    <div id="view-history" class="hidden space-y-6">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-4">
+          <div>
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="help-circle" class="w-5 h-5 text-amber-500"></i>
+              <span>Artículos No Encontrados en Catálogo</span>
+              <span id="unfoundCountBadge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">0 pendientes</span>
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">Registro de artículos leídos en facturas que aún no existen en Tango Gestión. Sirve de guía para saber qué artículos dar de alta en el sistema.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="loadUnfoundItems(true)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+              <span>Actualizar</span>
+            </button>
+            <button onclick="clearAllUnfoundItems()" class="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              <span>Limpiar Lista</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Barra de búsqueda -->
+        <div class="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div class="relative flex-1">
+            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+            <input type="text" id="unfoundSearchInput" oninput="filterUnfoundItems()" placeholder="Buscar por descripción, proveedor o comprobante..." class="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-brand-500 focus:outline-none">
+          </div>
+          <div class="text-xs text-slate-500 font-medium px-2 flex items-center gap-1.5">
+            <i data-lucide="info" class="w-3.5 h-3.5 text-slate-400"></i>
+            <span>Los artículos nuevos deben darse de alta primero en Tango y sincronizarse con "Actualizar con nueva tabla".</span>
+          </div>
+        </div>
+
+        <!-- Tabla / Lista de Sugerencias -->
+        <div class="mt-4 overflow-x-auto border border-slate-200 rounded-xl bg-white max-h-[550px]">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead class="sticky top-0 bg-slate-100 text-slate-600 font-semibold border-b border-slate-200 z-10 text-[11px] uppercase tracking-wider">
+              <tr>
+                <th class="py-2.5 px-3">Descripción en Factura</th>
+                <th class="py-2.5 px-3">Proveedor(es)</th>
+                <th class="py-2.5 px-3">Último Comprobante</th>
+                <th class="py-2.5 px-3">Último Precio</th>
+                <th class="py-2.5 px-3 text-center">Apariciones</th>
+                <th class="py-2.5 px-3">Última Detección</th>
+                <th class="py-2.5 px-3 text-right">Quitar</th>
+              </tr>
+            </thead>
+            <tbody id="unfoundTableBody" class="divide-y divide-slate-100">
+              <!-- Renglones inyectados dinámicamente -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. PESTAÑA: REGISTRO DE USO IA -->
+    <div id="view-logs" class="hidden space-y-6">
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+        <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+          <div>
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="activity" class="w-4 h-4 text-brand-600"></i>
+              <span>Registro de Auditoría de IA (Gemini)</span>
+            </h2>
+            <p class="text-xs text-slate-500">Histórico de llamadas, tokens consumidos, tiempos de respuesta y clave utilizada.</p>
+          </div>
+        </div>
+
+        <div class="mt-4 overflow-x-auto max-h-[550px]">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-500 sticky top-0 uppercase tracking-wider font-semibold border-b border-slate-200">
+              <tr>
+                <th class="py-2.5 px-3">Fecha y Hora</th>
+                <th class="py-2.5 px-3">Documento</th>
+                <th class="py-2.5 px-3">Clave Utilizada</th>
+                <th class="py-2.5 px-3">Tokens Entrada</th>
+                <th class="py-2.5 px-3">Tokens Salida</th>
+                <th class="py-2.5 px-3">Tiempo</th>
+                <th class="py-2.5 px-3">Estado</th>
+              </tr>
+            </thead>
+            <tbody id="logsTableBody" class="divide-y divide-slate-100">
+              <!-- Logs inyectados -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- MODAL DE ASIGNACIÓN MANUAL / BÚSQUEDA EN CATÁLOGO -->
+  <div id="manualAssignModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-xl border border-slate-200 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <i data-lucide="tag" class="w-4 h-4 text-brand-600"></i>
+          <span>Asignar Artículo del Catálogo</span>
+        </h3>
+        <button onclick="closeManualAssignModal()" class="text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+        <p class="text-slate-500">Renglón en Factura:</p>
+        <p id="modalItemFacturaDesc" class="font-bold text-slate-800 text-sm mt-0.5">Descripción de muestra</p>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Buscar en los 1.370 artículos:</label>
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+          <input type="text" id="modalSearchCatalog" oninput="searchCatalogInModal()" placeholder="Ej: POLIOL, Z1001, VORANOL..." 
+                 class="pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs w-full focus:ring-2 focus:ring-brand-500 focus:outline-none">
+        </div>
+      </div>
+
+      <div id="modalCatalogResults" class="max-h-60 overflow-y-auto space-y-1.5 divide-y divide-slate-100 text-xs">
+        <!-- Resultados de búsqueda -->
+      </div>
+
+      <div class="flex items-center justify-between pt-3 border-t border-slate-100">
+        <button onclick="clearItemAssignment()" class="text-xs text-rose-600 hover:text-rose-700 font-semibold">
+          Quitar asignación (Marcar Sin Catálogo)
+        </button>
+        <button onclick="closeManualAssignModal()" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold rounded-xl">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CONFIGURACIÓN DE CLAVES GEMINI -->
+  <div id="apiKeyModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <i data-lucide="key" class="w-4 h-4 text-amber-500"></i>
+          <span>Gestión de Claves Gemini AI</span>
+        </h3>
+        <button onclick="closeApiKeyModal()" class="text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Clave Predeterminada (Gratuita):</label>
+          <div class="flex gap-2">
+            <input type="password" id="inputKeyGratuita" class="flex-1 font-mono border border-slate-300 rounded-lg px-3 py-2 text-xs bg-slate-50" readonly>
+            <button onclick="toggleKeyVisibility('inputKeyGratuita')" class="p-2 border border-slate-300 rounded-lg hover:bg-slate-100 text-slate-600">
+              <i data-lucide="eye" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Se utiliza prioritariamente para todas las lecturas de facturas.</p>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Clave de Resguardo (Paga / Backup):</label>
+          <div class="flex gap-2">
+            <input type="password" id="inputKeyPaga" class="flex-1 font-mono border border-slate-300 rounded-lg px-3 py-2 text-xs bg-slate-50" readonly>
+            <button onclick="toggleKeyVisibility('inputKeyPaga')" class="p-2 border border-slate-300 rounded-lg hover:bg-slate-100 text-slate-600">
+              <i data-lucide="eye" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Se activa automáticamente previa confirmación si la gratuita se agota o satura.</p>
+        </div>
+
+        <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 space-y-1">
+          <p class="font-bold flex items-center gap-1.5">
+            <i data-lucide="shield-alert" class="w-4 h-4"></i>
+            <span>Seguridad de Costos:</span>
+          </p>
+          <p>El sistema <strong>nunca</strong> utilizará la clave paga sin tu consentimiento explícito en pantalla.</p>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-3 border-t border-slate-100">
+        <button onclick="closeApiKeyModal()" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold rounded-xl">
+          Entendido
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE ACTUALIZACIÓN CON TABLA CRUDA DE TANGO GESTIÓN -->
+  <div id="modalTangoSync" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] space-y-4">
+      
+      <!-- Encabezado del Modal -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div>
+          <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <i data-lucide="file-check-2" class="w-4 h-4 text-indigo-600"></i>
+            <span>Actualizar Catálogo desde Tango Gestión</span>
+          </h3>
+          <p class="text-[11px] text-slate-500 mt-0.5">
+            Cotejo automático de artículos con código <strong class="text-slate-700 font-mono">"Z"</strong>. Los sinónimos existentes en el catálogo maestro se conservan intactos.
+          </p>
+        </div>
+        <button onclick="closeTangoSyncModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Métricas del Cotejo -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-center">
+          <span class="text-[10px] uppercase font-bold text-slate-400">Filas en Tango</span>
+          <p id="statTangoTotalRows" class="text-base font-bold text-slate-800">0</p>
+        </div>
+        <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-center">
+          <span class="text-[10px] uppercase font-bold text-slate-400">Artículos 'Z'</span>
+          <p id="statTangoZCount" class="text-base font-bold text-indigo-700">0</p>
+        </div>
+        <div class="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+          <span class="text-[10px] uppercase font-bold text-emerald-700">🟢 Nuevos</span>
+          <p id="statTangoNewCount" class="text-base font-bold text-emerald-700">0</p>
+        </div>
+        <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-center">
+          <span class="text-[10px] uppercase font-bold text-amber-700">🟡 Modificaciones</span>
+          <p id="statTangoModCount" class="text-base font-bold text-amber-700">0</p>
+        </div>
+      </div>
+
+      <!-- Pestañas de Detalle (Modificaciones / Nuevos) -->
+      <div class="flex items-center gap-2 border-b border-slate-200 text-xs">
+        <button id="btnTabSyncMods" onclick="switchSyncViewTab('mods')" class="px-3 py-1.5 font-bold border-b-2 border-amber-600 text-amber-800 flex items-center gap-1.5 transition">
+          <span>Modificaciones Detectadas</span>
+          <span id="badgeTabSyncMods" class="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-200 text-amber-800 font-extrabold">0</span>
+        </button>
+        <button id="btnTabSyncNews" onclick="switchSyncViewTab('news')" class="px-3 py-1.5 font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 flex items-center gap-1.5 transition">
+          <span>Nuevos Artículos a Agregar</span>
+          <span id="badgeTabSyncNews" class="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-100 text-emerald-800 font-extrabold">0</span>
+        </button>
+      </div>
+
+      <!-- Contenedor con Scroll de las Tablas -->
+      <div class="flex-1 overflow-y-auto max-h-[350px] border border-slate-200 rounded-xl bg-slate-50/40">
+        
+        <!-- Tabla de Modificaciones -->
+        <div id="viewSyncMods">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead class="sticky top-0 bg-slate-100 text-slate-600 font-semibold border-b border-slate-200 z-10 text-[11px]">
+              <tr>
+                <th class="py-2 px-3 w-28">Código</th>
+                <th class="py-2 px-3 w-32">Campo</th>
+                <th class="py-2 px-3 w-1/2 border-r border-slate-200">Valor Actual en Catálogo</th>
+                <th class="py-2 px-3 w-1/2 text-indigo-900">Nuevo Valor en Tango</th>
+              </tr>
+            </thead>
+            <tbody id="tableBodySyncMods" class="divide-y divide-slate-100 bg-white">
+              <!-- Renglones inyectados dinámicamente -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Tabla de Nuevos Artículos -->
+        <div id="viewSyncNews" class="hidden">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead class="sticky top-0 bg-slate-100 text-slate-600 font-semibold border-b border-slate-200 z-10 text-[11px]">
+              <tr>
+                <th class="py-2 px-3 w-28">Código</th>
+                <th class="py-2 px-3">Descripción Principal</th>
+                <th class="py-2 px-3">Descripción Adicional</th>
+              </tr>
+            </thead>
+            <tbody id="tableBodySyncNews" class="divide-y divide-slate-100 bg-white">
+              <!-- Renglones inyectados dinámicamente -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Aviso cuando el catálogo ya está 100% al día -->
+        <div id="syncNoChangesNotice" class="hidden p-8 text-center space-y-2">
+          <i data-lucide="check-circle-2" class="w-8 h-8 text-emerald-500 mx-auto"></i>
+          <p class="text-sm font-bold text-slate-800">¡El catálogo actual ya está 100% al día con Tango!</p>
+          <p class="text-xs text-slate-500">No se detectaron artículos nuevos ni cambios en las descripciones.</p>
+        </div>
+
+      </div>
+
+      <!-- Pie del Modal con Acciones -->
+      <div class="flex items-center justify-between pt-3 border-t border-slate-100">
+        <button onclick="closeTangoSyncModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition">
+          Cancelar
+        </button>
+        <button id="btnApplyTangoSync" onclick="applyTangoSync()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs">
+          <i data-lucide="check" class="w-3.5 h-3.5"></i>
+          <span id="btnApplyTangoSyncText">Aplicar Actualización al Catálogo</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MODAL DE EDICIÓN / CREACIÓN DE ARTÍCULO EN ARTÍCULOS.XLSX -->
+  <div id="catalogEditModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 id="modalEditTitle" class="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <i data-lucide="file-spreadsheet" class="w-4 h-4 text-brand-600"></i>
+          <span>Editar Artículo en Catalogo de Articulos.xlsx</span>
+        </h3>
+        <button onclick="closeCatalogEditModal()" class="text-slate-400 hover:text-slate-600 p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <input type="hidden" id="editItemOriginalCode">
+        
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Código del Artículo:</label>
+          <input type="text" id="editItemCodigo" class="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-brand-500 focus:outline-none" placeholder="Ej: Z1001-2">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Descripción Principal:</label>
+          <input type="text" id="editItemDescripcion" class="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-brand-500 focus:outline-none" placeholder="Ej: VORANOL 3011">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Descripción Adicional:</label>
+          <input type="text" id="editItemAdicional" class="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-brand-500 focus:outline-none" placeholder="Ej: POLIOL / DOW">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Sinónimo(s):</label>
+          <input type="text" id="editItemSinonimo" class="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-brand-500 focus:outline-none" placeholder="Ej: POLIOL, VORANOL">
+          <p class="text-[11px] text-slate-400 mt-1">Puedes ingresar varios sinónimos separados por coma.</p>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-3 border-t border-slate-100">
+        <button onclick="closeCatalogEditModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl">
+          Cancelar
+        </button>
+        <button onclick="saveCatalogItemChanges()" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs">
+          <i data-lucide="save" class="w-3.5 h-3.5"></i>
+          <span>Guardar en Catalogo de Articulos.xlsx</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL FLOTANTE / MÓVIL PARA CARGA EN TANGO -->
+  <div id="modalTangoFloating" class="hidden fixed z-50 bg-white rounded-2xl shadow-2xl border border-slate-300 flex flex-col overflow-hidden" style="top: 80px; left: 24px; width: 45vw; max-width: 650px; min-width: 360px; max-height: 85vh;">
+    <!-- Encabezado Draggable -->
+    <div id="modalTangoHeader" class="px-4 py-2.5 bg-slate-800 text-white flex items-center justify-between select-none cursor-move border-b border-slate-700">
+      <div class="flex items-center gap-2">
+        <i data-lucide="grip-horizontal" class="w-4 h-4 text-slate-400"></i>
+        <span class="text-xs font-bold tracking-wide flex items-center gap-1.5">
+          <i data-lucide="table-2" class="w-4 h-4 text-indigo-400"></i>
+          <span>Artículos para Tango</span>
+        </span>
+        <span id="tangoItemCountBadge" class="ml-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/30 text-indigo-300 border border-indigo-500/40">0 vinculados</span>
+      </div>
+      
+      <div class="flex items-center gap-2.5">
+        <!-- Checkbox Fijar a la vista sobre otras aplicaciones -->
+        <label class="inline-flex items-center gap-1.5 text-[11px] text-slate-300 hover:text-white cursor-pointer bg-slate-700/70 hover:bg-slate-700 px-2.5 py-1 rounded-lg transition" title="Mantiene una ventana flotante fija por encima de Tango y otras aplicaciones de Windows">
+          <input type="checkbox" id="chkTangoAlwaysOnTop" onchange="toggleTangoAlwaysOnTop(this.checked)" class="rounded text-indigo-500 focus:ring-0 cursor-pointer w-3.5 h-3.5">
+          <span class="font-medium flex items-center gap-1">
+            <i data-lucide="pin" class="w-3 h-3 text-indigo-400"></i>
+            <span>Fijar a la vista (Tango)</span>
+          </span>
+        </label>
+        
+        <button onclick="closeTangoFloatingModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-700 transition" title="Cerrar modal">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Info rápida de la Factura y Ayuda -->
+    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs flex items-center justify-between text-slate-600">
+      <div class="truncate mr-2">
+        <span class="font-bold text-slate-900" id="tangoModalProveedor">Proveedor</span> &bull; 
+        <span class="text-slate-600 font-mono text-[11px]" id="tangoModalComprobante">Comp</span>
+      </div>
+      <div class="text-[11px] text-slate-400 shrink-0 flex items-center gap-1">
+        <i data-lucide="mouse-pointer-click" class="w-3 h-3 text-indigo-500"></i>
+        <span>Haz clic en el código para copiarlo</span>
+      </div>
+    </div>
+
+    <!-- Cuerpo de la Tabla (2 Columnas) -->
+    <div class="flex-1 overflow-y-auto p-0 max-h-[calc(85vh-110px)]">
+      <table class="w-full text-left text-xs border-collapse">
+        <thead class="sticky top-0 bg-slate-100 z-10 border-b border-slate-200 shadow-2xs">
+          <tr>
+            <th class="py-2.5 px-3.5 font-bold text-slate-700 text-[11px] uppercase tracking-wider w-1/2 border-r border-slate-200">
+              Artículo en Factura (IA)
+            </th>
+            <th class="py-2.5 px-3.5 font-bold text-indigo-900 text-[11px] uppercase tracking-wider w-1/2">
+              Artículo Vinculado (Tango)
+            </th>
+          </tr>
+        </thead>
+        <tbody id="tangoTableBody" class="divide-y divide-slate-100 bg-white">
+          <!-- Renglones inyectados dinámicamente -->
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pie del Modal -->
+    <div class="px-4 py-2 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex items-center justify-between select-none">
+      <span class="flex items-center gap-1.5">
+        <i data-lucide="move" class="w-3.5 h-3.5 text-slate-400"></i>
+        <span>Arrastra desde la barra oscura superior para mover</span>
+      </span>
+      <span id="tangoCopyToast" class="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 hidden transition-all">¡Código copiado!</span>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT DE LA APLICACIÓN -->
+  <script>
+    const GEMINI_DEFAULT_KEY = 'AQ.Ab8RN6JzcaWq_A7PIwLOQW1G8oh0L6vXiL91krzegYzV1lpkgA';
+    const GEMINI_BACKUP_KEY  = 'AQ.Ab8RN6Ky7GVhU_ddnyv2DQ-2rXj_t1ke5Y5TDC6MUaB7xRGplA';
+    const GEMINI_MODEL = 'gemini-3.5-flash-lite';
+
+    // Configuración de Supabase (Sincronización en la Nube con aislamiento de ID)
+    const SUPABASE_URL = 'https://sqxyyosnjvtqoqotoblw.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_dD3fdn_k89AKTojcRoyPUQ_pdvnlUjq';
+    const SUPABASE_APP_ID = 'lector_facturas_state';
+
+    let currentApiKeyMode = 'gratuita';
+    let fullCatalog = [];
+    let catalogCompactText = '';
+    let currentFile = null;
+    let currentPdfDoc = null;
+    let currentPdfPage = 1;
+    let currentInvoiceData = null;
+    let activeFilter = 'all';
+    let activeAssignItemIndex = null;
+    let isCloudOnline = false;
+
+    document.getElementById('inputKeyGratuita').value = GEMINI_DEFAULT_KEY;
+    document.getElementById('inputKeyPaga').value = GEMINI_BACKUP_KEY;
+
+    // Conexión REST a Supabase
+    async function fetchSupabaseState() {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/app_state?id=eq.${SUPABASE_APP_ID}&select=*`, {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data && data.length > 0 && data[0].payload) {
+          isCloudOnline = true;
+          return data[0].payload;
+        }
+      } catch (err) {
+        console.warn("Supabase fetch offline:", err);
+      }
+      return null;
+    }
+
+    async function saveSupabaseState(partialPayload) {
+      try {
+        // Obtener estado actual primero para mergear
+        const current = await fetchSupabaseState() || {};
+        const mergedPayload = { ...current, ...partialPayload, updatedAt: new Date().toISOString() };
+
+        await fetch(`${SUPABASE_URL}/rest/v1/app_state`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify({
+            id: SUPABASE_APP_ID,
+            payload: mergedPayload,
+            updated_at: new Date().toISOString()
+          })
+        });
+        return true;
+      } catch(e) {
+        console.warn("Error guardando en Supabase:", e);
+        return false;
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      lucide.createIcons();
+      await fetchCatalog();
+      await loadUnfoundItems();
+      await loadLogs();
+    });
+
+    function selectApiKeyMode(mode) {
+      currentApiKeyMode = mode;
+      const btnGratuita = document.getElementById('btnKeyGratuita');
+      const btnPaga = document.getElementById('btnKeyPaga');
+
+      if (mode === 'gratuita') {
+        btnGratuita.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition bg-white shadow-xs text-emerald-700";
+        btnPaga.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition text-slate-600 hover:text-slate-900";
+      } else {
+        btnPaga.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition bg-white shadow-xs text-amber-700";
+        btnGratuita.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition text-slate-600 hover:text-slate-900";
+      }
+    }
+
+    function switchTab(tab) {
+      ['scanner', 'catalog', 'history', 'logs'].forEach(t => {
+        const view = document.getElementById('view-' + t);
+        const btn = document.getElementById('tab-' + t);
+        if (t === tab) {
+          view.classList.remove('hidden');
+          btn.classList.add('tab-active');
+        } else {
+          view.classList.add('hidden');
+          btn.classList.remove('tab-active');
+        }
+      });
+      lucide.createIcons();
+    }
+
+    // Carga de Catálogo (Híbrido: Servidor Local o Supabase Cloud)
+    async function fetchCatalog(forceRefresh = false) {
+      const headerElem = document.getElementById('headerCatalogCount');
+      const badgeElem = document.getElementById('tabCatalogBadge');
+      const totalBadge = document.getElementById('catalogTotalBadge');
+
+      headerElem.textContent = 'Actualizando...';
+
+      // 1. Intentar leer desde Supabase Cloud primero
+      const cloudState = await fetchSupabaseState();
+      if (cloudState && Array.isArray(cloudState.catalog) && cloudState.catalog.length > 0) {
+        fullCatalog = cloudState.catalog;
+        catalogCompactText = fullCatalog.map(it => {
+          const parts = [it.codigo, it.descripcion];
+          if (it.adicional) parts.push(it.adicional);
+          if (it.sinonimo) parts.push(it.sinonimo);
+          return parts.join(' | ');
+        }).join('\n');
+
+        headerElem.innerHTML = `<span class="inline-flex items-center gap-1 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>${fullCatalog.length} artículos (En vivo)</span>`;
+        if (badgeElem) badgeElem.textContent = fullCatalog.length;
+        if (totalBadge) totalBadge.textContent = `${fullCatalog.length} artículos`;
+        renderCatalogTable(fullCatalog);
+        return;
+      }
+
+      // 2. Fallback: Intentar leer desde servidor Node local (/api/catalog)
+      try {
+        const res = await fetch('/api/catalog' + (forceRefresh ? '?t=' + Date.now() : ''));
+        const data = await res.json();
+
+        if (data.success && Array.isArray(data.items)) {
+          fullCatalog = data.items;
+          catalogCompactText = data.compactText || '';
+          headerElem.textContent = `${fullCatalog.length} artículos (Excel Local)`;
+          if (badgeElem) badgeElem.textContent = fullCatalog.length;
+          if (totalBadge) totalBadge.textContent = `${fullCatalog.length} artículos`;
+          renderCatalogTable(fullCatalog);
+          return;
+        }
+      } catch (err) {
+        console.warn('Servidor local no disponible, intentando localStorage');
+      }
+
+      // 3. Fallback de emergencia: Cache local
+      if (fullCatalog.length > 0) {
+        headerElem.textContent = `${fullCatalog.length} artículos (Cache)`;
+        renderCatalogTable(fullCatalog);
+      } else {
+        headerElem.textContent = 'Error al leer catálogo';
+      }
+    }
+
+    // Descarga directa del Catálogo a formato .xlsx con 100% de los sinónimos
+    function downloadCatalogExcel() {
+      if (!fullCatalog || fullCatalog.length === 0) {
+        alert("El catálogo está vacío o cargándose.");
+        return;
+      }
+
+      try {
+        const rows = [
+          ['Código', 'Descripción', 'Descripción adicional', 'Sinónimo']
+        ];
+
+        fullCatalog.forEach(it => {
+          rows.push([
+            it.codigo || '',
+            it.descripcion || '',
+            it.adicional || '',
+            it.sinonimo || ''
+          ]);
+        });
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        XLSX.utils.book_append_sheet(wb, ws, 'Artículos');
+
+        XLSX.writeFile(wb, 'Catalogo de Articulos.xlsx');
+      } catch (err) {
+        alert("Error al descargar Excel: " + err.message);
+      }
+    }
+
+    let isCatalogEditMode = false;
+    let pendingCatalogEdits = new Map();
+    let lastRenderedCatalogItems = [];
+
+    function renderCatalogTable(items) {
+      lastRenderedCatalogItems = items || [];
+      const tbody = document.getElementById('catalogTableBody');
+      tbody.innerHTML = '';
+
+      const slice = (items || []).slice(0, 300);
+      slice.forEach(item => {
+        const tr = document.createElement('tr');
+        const isModified = pendingCatalogEdits.has(item.codigo);
+        const currentData = isModified ? pendingCatalogEdits.get(item.codigo) : item;
+
+        if (isCatalogEditMode) {
+          tr.className = isModified ? 'bg-amber-50/80 border-l-4 border-amber-500 transition' : 'hover:bg-slate-50 transition';
+          tr.innerHTML = `
+            <td class="py-1.5 px-2">
+              <input type="text" class="w-full px-2 py-1 text-xs font-mono font-bold text-brand-700 bg-white border border-slate-300 rounded focus:ring-1 focus:ring-brand-500 focus:outline-none shadow-2xs" value="${escapeQuotes(currentData.codigo)}">
+            </td>
+            <td class="py-1.5 px-2">
+              <input type="text" class="w-full px-2 py-1 text-xs text-slate-800 bg-white border border-slate-300 rounded focus:ring-1 focus:ring-brand-500 focus:outline-none shadow-2xs" value="${escapeQuotes(currentData.descripcion)}">
+            </td>
+            <td class="py-1.5 px-2">
+              <input type="text" class="w-full px-2 py-1 text-xs text-slate-600 bg-white border border-slate-300 rounded focus:ring-1 focus:ring-brand-500 focus:outline-none shadow-2xs" value="${escapeQuotes(currentData.adicional || '')}">
+            </td>
+            <td class="py-1.5 px-2">
+              <input type="text" class="w-full px-2 py-1 text-xs text-slate-600 bg-white border border-slate-300 rounded focus:ring-1 focus:ring-brand-500 focus:outline-none shadow-2xs" value="${escapeQuotes(currentData.sinonimo || '')}">
+            </td>
+            <td class="py-1.5 px-2 text-right">
+              <span class="edit-row-status ${isModified ? 'text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md' : 'text-[10px] text-slate-400 italic'}">
+                ${isModified ? 'Modificado' : 'Sin cambios'}
+              </span>
+            </td>
+          `;
+
+          const inputs = tr.querySelectorAll('input');
+          inputs[0].oninput = (e) => onCatalogCellChange(item.codigo, 'codigo', e.target.value, tr);
+          inputs[1].oninput = (e) => onCatalogCellChange(item.codigo, 'descripcion', e.target.value, tr);
+          inputs[2].oninput = (e) => onCatalogCellChange(item.codigo, 'adicional', e.target.value, tr);
+          inputs[3].oninput = (e) => onCatalogCellChange(item.codigo, 'sinonimo', e.target.value, tr);
+
+        } else {
+          tr.className = 'hover:bg-slate-50 transition';
+          tr.innerHTML = `
+            <td class="py-2 px-3 font-bold text-brand-700 font-mono">${escapeHtml(item.codigo)}</td>
+            <td class="py-2 px-3 text-slate-800">${escapeHtml(item.descripcion)}</td>
+            <td class="py-2 px-3 text-slate-500">${escapeHtml(item.adicional || '-')}</td>
+            <td class="py-2 px-3 text-slate-500">${escapeHtml(item.sinonimo || '-')}</td>
+            <td class="py-2 px-3 text-right">
+              <button class="btn-catalog-edit px-2.5 py-1 bg-slate-100 hover:bg-brand-50 hover:text-brand-700 border border-slate-200 rounded-lg text-slate-600 font-semibold transition text-[11px] flex items-center gap-1 ml-auto shadow-2xs">
+                <i data-lucide="pencil" class="w-3 h-3"></i>
+                <span>Editar</span>
+              </button>
+            </td>
+          `;
+          const editBtn = tr.querySelector('.btn-catalog-edit');
+          if (editBtn) {
+            editBtn.onclick = () => openCatalogEditModal(item);
+          }
+        }
+
+        tbody.appendChild(tr);
+      });
+
+      if (items.length > 300) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td colspan="5" class="py-3 text-center text-slate-400 italic">Mostrando primeros 300 de ${items.length} artículos. Usa el buscador para filtrar los que quieras editar.</td>`;
+        tbody.appendChild(tr);
+      }
+      lucide.createIcons();
+    }
+
+    function toggleCatalogEditMode() {
+      isCatalogEditMode = !isCatalogEditMode;
+      const btnToggle = document.getElementById('btnToggleCatalogEdit');
+      const editActions = document.getElementById('catalogEditActions');
+      const banner = document.getElementById('catalogEditBanner');
+      const btnNew = document.getElementById('btnCatalogNewItem');
+
+      if (isCatalogEditMode) {
+        if (btnToggle) btnToggle.classList.add('hidden');
+        if (editActions) editActions.classList.remove('hidden');
+        if (banner) banner.classList.remove('hidden');
+        if (btnNew) btnNew.classList.add('hidden');
+        updatePendingEditsBadge();
+      } else {
+        if (btnToggle) btnToggle.classList.remove('hidden');
+        if (editActions) editActions.classList.add('hidden');
+        if (banner) banner.classList.add('hidden');
+        if (btnNew) btnNew.classList.remove('hidden');
+      }
+
+      renderCatalogTable(lastRenderedCatalogItems.length ? lastRenderedCatalogItems : fullCatalog);
+    }
+
+    function cancelCatalogEditMode() {
+      if (pendingCatalogEdits.size > 0) {
+        if (!confirm(`Tienes ${pendingCatalogEdits.size} modificaciones sin guardar. ¿Deseas descartarlas?`)) {
+          return;
+        }
+      }
+      pendingCatalogEdits.clear();
+      isCatalogEditMode = false;
+      const btnToggle = document.getElementById('btnToggleCatalogEdit');
+      const editActions = document.getElementById('catalogEditActions');
+      const banner = document.getElementById('catalogEditBanner');
+      const btnNew = document.getElementById('btnCatalogNewItem');
+      if (btnToggle) btnToggle.classList.remove('hidden');
+      if (editActions) editActions.classList.add('hidden');
+      if (banner) banner.classList.add('hidden');
+      if (btnNew) btnNew.classList.remove('hidden');
+
+      renderCatalogTable(lastRenderedCatalogItems.length ? lastRenderedCatalogItems : fullCatalog);
+    }
+
+    function updatePendingEditsBadge() {
+      const badge = document.getElementById('badgePendingEdits');
+      const counterText = document.getElementById('catalogEditCounterText');
+      const count = pendingCatalogEdits.size;
+      if (badge) {
+        if (count > 0) {
+          badge.textContent = count;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+      }
+      if (counterText) {
+        counterText.textContent = `${count} ${count === 1 ? 'modificación' : 'modificaciones'}`;
+      }
+    }
+
+    function onCatalogCellChange(originalCodigo, field, value, tr) {
+      if (!pendingCatalogEdits.has(originalCodigo)) {
+        const orig = fullCatalog.find(it => it.codigo === originalCodigo) || { codigo: originalCodigo, descripcion: '', adicional: '', sinonimo: '' };
+        pendingCatalogEdits.set(originalCodigo, {
+          originalCodigo: orig.codigo,
+          codigo: orig.codigo,
+          descripcion: orig.descripcion,
+          adicional: orig.adicional || '',
+          sinonimo: orig.sinonimo || ''
+        });
+      }
+
+      const entry = pendingCatalogEdits.get(originalCodigo);
+      entry[field] = value;
+
+      if (tr) {
+        tr.classList.add('bg-amber-50/80', 'border-l-4', 'border-amber-500');
+        const statusSpan = tr.querySelector('.edit-row-status');
+        if (statusSpan) {
+          statusSpan.textContent = 'Modificado';
+          statusSpan.className = 'edit-row-status text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md';
+        }
+      }
+
+      updatePendingEditsBadge();
+    }
+
+    async function saveBulkCatalogEdits() {
+      if (pendingCatalogEdits.size === 0) {
+        alert("No has realizado ninguna modificación en la tabla.");
+        return;
+      }
+
+      const updates = Array.from(pendingCatalogEdits.values());
+      const btnSave = document.getElementById('btnSaveBulkEdits');
+      const origHtml = btnSave ? btnSave.innerHTML : '';
+      if (btnSave) {
+        btnSave.disabled = true;
+        btnSave.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span>Guardando en Excel...</span>`;
+        lucide.createIcons();
+      }
+
+        // 1. Aplicar modificaciones en memoria y Supabase
+        updates.forEach(up => {
+          const item = fullCatalog.find(x => x.codigo === (up.originalCodigo || up.codigo));
+          if (item) {
+            item.codigo = up.codigo;
+            item.descripcion = up.descripcion;
+            item.adicional = up.adicional;
+            item.sinonimo = up.sinonimo;
+          }
+        });
+        await saveSupabaseState({ catalog: fullCatalog, count: fullCatalog.length });
+
+        // 2. Intentar guardar en backend local
+        try {
+          const res = await fetch('/api/catalog/bulk-update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ updates })
+          });
+          const data = await res.json();
+          alert(data.message || `¡Se guardaron ${updates.length} modificaciones con éxito!`);
+        } catch (localErr) {
+          alert(`¡Se guardaron ${updates.length} modificaciones con éxito en la nube!`);
+        }
+
+        pendingCatalogEdits.clear();
+        isCatalogEditMode = false;
+        const btnToggle = document.getElementById('btnToggleCatalogEdit');
+        const editActions = document.getElementById('catalogEditActions');
+        const banner = document.getElementById('catalogEditBanner');
+        const btnNew = document.getElementById('btnCatalogNewItem');
+        if (btnToggle) btnToggle.classList.remove('hidden');
+        if (editActions) editActions.classList.add('hidden');
+        if (banner) banner.classList.add('hidden');
+        if (btnNew) btnNew.classList.remove('hidden');
+
+        await fetchCatalog(true);
+      } catch (err) {
+        console.error("Error al guardar cambios masivos:", err);
+        alert("Error al guardar modificaciones: " + err.message);
+      } finally {
+        if (btnSave) {
+          btnSave.disabled = false;
+          btnSave.innerHTML = origHtml;
+          lucide.createIcons();
+        }
+      }
+    }
+
+    function normalizeSearch(str) {
+      if (!str) return '';
+      return String(str).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    }
+
+    function itemMatchesQuery(it, rawQuery) {
+      if (!rawQuery) return true;
+      const terms = rawQuery
+        .split(/[+\s]+/)
+        .map(t => normalizeSearch(t))
+        .filter(t => t.length > 0);
+      if (terms.length === 0) return true;
+
+      const fullText = normalizeSearch(
+        `${it.codigo || ''} ${it.descripcion || ''} ${it.adicional || ''} ${it.sinonimo || ''}`
+      );
+      return terms.every(t => fullText.includes(t));
+    }
+
+    function filterCatalogTable() {
+      const rawQuery = document.getElementById('catalogSearchInput').value;
+      if (!rawQuery.trim()) {
+        renderCatalogTable(fullCatalog);
+        return;
+      }
+      const filtered = fullCatalog.filter(it => itemMatchesQuery(it, rawQuery));
+      renderCatalogTable(filtered);
+    }
+
+    // ==========================================
+    // EDICIÓN Y CREACIÓN EN CATÁLOGO MASTER (EXCEL)
+    // ==========================================
+    function openCatalogEditModal(item) {
+      const modal = document.getElementById('catalogEditModal');
+      const title = document.getElementById('modalEditTitle');
+      const origCode = document.getElementById('editItemOriginalCode');
+      const cod = document.getElementById('editItemCodigo');
+      const desc = document.getElementById('editItemDescripcion');
+      const adic = document.getElementById('editItemAdicional');
+      const sin = document.getElementById('editItemSinonimo');
+
+      if (!modal) return;
+
+      if (item && item.codigo) {
+        // Modo Edición de Artículo Existente
+        if (title) title.innerHTML = '<i data-lucide="file-spreadsheet" class="w-4 h-4 text-brand-600"></i><span>Editar Artículo en Catalogo de Articulos.xlsx</span>';
+        origCode.value = item.codigo;
+        cod.value = item.codigo;
+        desc.value = item.descripcion || '';
+        adic.value = item.adicional || '';
+        sin.value = item.sinonimo || '';
+      } else {
+        // Modo Nuevo Artículo
+        if (title) title.innerHTML = '<i data-lucide="plus-circle" class="w-4 h-4 text-emerald-600"></i><span>Nuevo Artículo para Catalogo de Articulos.xlsx</span>';
+        origCode.value = '';
+        cod.value = '';
+        desc.value = '';
+        adic.value = '';
+        sin.value = '';
+      }
+
+      modal.classList.remove('hidden');
+      lucide.createIcons();
+      setTimeout(() => cod.focus(), 60);
+    }
+
+    function closeCatalogEditModal() {
+      const modal = document.getElementById('catalogEditModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function saveCatalogItemChanges() {
+      const origCode = document.getElementById('editItemOriginalCode').value.trim();
+      const codigo = document.getElementById('editItemCodigo').value.trim();
+      const descripcion = document.getElementById('editItemDescripcion').value.trim();
+      const adicional = document.getElementById('editItemAdicional').value.trim();
+      const sinonimo = document.getElementById('editItemSinonimo').value.trim();
+
+      if (!codigo || !descripcion) {
+        alert("El código y la descripción son obligatorios.");
+        return;
+      }
+
+      const isEdit = !!origCode;
+      const endpoint = isEdit ? '/api/catalog/update-item' : '/api/catalog/add-item';
+      const payload = isEdit 
+        ? { codigoOriginal: origCode, codigo, descripcion, adicional, sinonimo }
+        : { codigo, descripcion, adicional, sinonimo };
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Error al guardar cambios en Excel');
+        }
+
+        // Actualizar en Supabase si está online
+        if (isEdit) {
+          const idx = fullCatalog.findIndex(x => x.codigo === origCode);
+          if (idx >= 0) fullCatalog[idx] = { codigo, descripcion, adicional, sinonimo };
+        } else {
+          fullCatalog.push({ codigo, descripcion, adicional, sinonimo });
+        }
+        saveSupabaseState({ catalog: fullCatalog, count: fullCatalog.length });
+
+        alert(data.message || (isEdit ? 'Artículo actualizado con éxito' : 'Artículo agregado con éxito'));
+        closeCatalogEditModal();
+        await fetchCatalog(true);
+      } catch (err) {
+        // Si el endpoint local falló pero estamos en la nube, guardar directamente en Supabase
+        if (isEdit) {
+          const idx = fullCatalog.findIndex(x => x.codigo === origCode);
+          if (idx >= 0) fullCatalog[idx] = { codigo, descripcion, adicional, sinonimo };
+        } else {
+          fullCatalog.push({ codigo, descripcion, adicional, sinonimo });
+        }
+        const saved = await saveSupabaseState({ catalog: fullCatalog, count: fullCatalog.length });
+        if (saved) {
+          alert(isEdit ? 'Artículo actualizado en la nube' : 'Artículo agregado en la nube');
+          closeCatalogEditModal();
+          await fetchCatalog(true);
+        } else {
+          console.error("Error al guardar artículo en catálogo:", err);
+          alert("Error al guardar: " + err.message);
+        }
+      }
+    }
+
+    // Archivos Drag & Drop
+    function handleDragOver(e) {
+      e.preventDefault();
+      document.getElementById('dropZone').classList.add('border-brand-500', 'bg-sky-50');
+    }
+    function handleDragLeave(e) {
+      e.preventDefault();
+      document.getElementById('dropZone').classList.remove('border-brand-500', 'bg-sky-50');
+    }
+    function handleDrop(e) {
+      e.preventDefault();
+      document.getElementById('dropZone').classList.remove('border-brand-500', 'bg-sky-50');
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        loadSelectedFile(e.dataTransfer.files[0]);
+      }
+    }
+    function handleFileSelect(e) {
+      if (e.target.files && e.target.files.length > 0) {
+        loadSelectedFile(e.target.files[0]);
+      }
+    }
+
+    function loadSelectedFile(file) {
+      currentFile = file;
+      document.getElementById('selectedFileName').textContent = file.name;
+      document.getElementById('selectedFileSize').textContent = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+      document.getElementById('fileSelectedBox').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function clearSelectedFile() {
+      currentFile = null;
+      document.getElementById('fileInput').value = '';
+      document.getElementById('fileSelectedBox').classList.add('hidden');
+    }
+
+    // Llamada Gemini con Fallback
+    async function callGeminiApiWithFallback({ prompt, mimeType, base64Data, onStatusUpdate }) {
+      const isForcedPaid = currentApiKeyMode === 'paga';
+      const keysToTry = [];
+
+      if (isForcedPaid) {
+        keysToTry.push({ key: GEMINI_BACKUP_KEY, name: 'Clave de Resguardo (Paga / Backup)' });
+      } else {
+        keysToTry.push({ key: GEMINI_DEFAULT_KEY, name: 'Clave Gratuita / Principal' });
+        keysToTry.push({ key: GEMINI_BACKUP_KEY, name: 'Clave de Resguardo (Paga / Backup)' });
+      }
+
+      let lastError = null;
+
+      for (let i = 0; i < keysToTry.length; i++) {
+        const kObj = keysToTry[i];
+        if (i > 0 && onStatusUpdate) {
+          onStatusUpdate(`Conmutando a ${kObj.name} por solicitud del usuario...`);
+        }
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${kObj.key}`;
+        const payload = {
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                {
+                  inline_data: {
+                    mime_type: mimeType,
+                    data: base64Data
+                  }
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            response_mime_type: "application/json",
+            temperature: 0.1
+          }
+        };
+
+        const startTime = Date.now();
+        try {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(2);
+          const data = await res.json();
+
+          if (res.ok) {
+            const usage = data.usageMetadata || {};
+            logApiCall({
+              documento: currentFile?.name || 'Comprobante',
+              usedKeyName: kObj.name,
+              tokensIn: usage.promptTokenCount || 0,
+              tokensOut: usage.candidatesTokenCount || 0,
+              tiempo: elapsedSec + 's',
+              status: '200 OK'
+            });
+
+            return { data, usedKeyName: kObj.name };
+          }
+
+          const errMsg = data.error?.message || `HTTP ${res.status}`;
+          lastError = new Error(errMsg);
+
+          const isHighDemandOrQuota = res.status === 503 || res.status === 429 || res.status === 403 || 
+                                     errMsg.includes('high demand') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Overloaded');
+
+          if (isHighDemandOrQuota && i < keysToTry.length - 1) {
+            const acceptSwitch = confirm(
+              `⚠️ ALERTA DE ALTA DEMANDA EN GEMINI (CLAVE GRATUITA):\n\n` +
+              `Google informa que sus servidores gratuitos están saturados en este momento:\n"${errMsg}"\n\n` +
+              `¿Deseas conmutar y procesar este documento usando la Clave de Resguardo (Paga)?\n\n` +
+              `• [Aceptar] = Procesar con la Clave de Resguardo\n` +
+              `• [Cancelar] = Cancelar y reintentar más tarde`
+            );
+
+            if (acceptSwitch) {
+              continue;
+            } else {
+              throw new Error(`Procesamiento cancelado por el usuario (Alta demanda en clave gratuita).`);
+            }
+          } else {
+            throw lastError;
+          }
+        } catch (e) {
+          lastError = e;
+          if (i < keysToTry.length - 1 && e.message && !e.message.includes('cancelado por el usuario')) {
+            continue;
+          }
+          throw lastError;
+        }
+      }
+
+      throw lastError || new Error("No se pudo conectar con Gemini API.");
+    }
+
+    // Procesamiento Principal de Factura con IA
+    async function processInvoiceWithGemini() {
+      if (!currentFile) {
+        alert("Por favor selecciona un archivo PDF o imagen primero.");
+        return;
+      }
+
+      const processingCard = document.getElementById('processingCard');
+      const resultsSection = document.getElementById('resultsSection');
+      const uploadSection = document.getElementById('uploadSection');
+      const statusTitle = document.getElementById('processingStatusTitle');
+      const statusDesc = document.getElementById('processingStatusDesc');
+
+      uploadSection.classList.add('hidden');
+      processingCard.classList.remove('hidden');
+      resultsSection.classList.add('hidden');
+
+      try {
+        statusTitle.textContent = "Sincronizando catálogo en vivo...";
+        statusDesc.textContent = "Leyendo última versión de Catalogo de Articulos.xlsx en Documentos...";
+        await fetchCatalog(true);
+
+        statusTitle.textContent = "Preparando documento...";
+        statusDesc.textContent = "Convirtiendo archivo para análisis...";
+
+        const base64Data = await readFileAsBase64(currentFile);
+        const mimeType = currentFile.type || (currentFile.name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+
+        renderDocumentPreview(currentFile);
+
+        statusTitle.textContent = "Analizando con Gemini 3.5 Flash Lite...";
+        statusDesc.textContent = `Inyectando ${fullCatalog.length} artículos del catálogo y cotejando renglones...`;
+
+        const prompt = `
+Eres un analista técnico de compras industriales y clasificador experto en insumos fabriles para Tango Gestión, en una empresa que fabrica colchones, sommiers y muebles de madera.
+Tu misión es analizar la factura o remito adjunto y COTEJAR CON PRECISIÓN TÉCNICA cada concepto o artículo comprado contra nuestro CATÁLOGO MAESTRO INTERNO.
+
+=== CATÁLOGO MAESTRO DE ARTÍCULOS (Formato: CÓDIGO | DESCRIPCIÓN | ADICIONAL | SINÓNIMO) ===
+${catalogCompactText}
+=== FIN CATÁLOGO MAESTRO ===
+
+CONTEXTO INDUSTRIAL Y REGLAS DE COTEJO:
+Estás clasificando insumos para una fábrica de colchones, sommiers y muebles de madera (química de espumas/polioles, perfiles para muebles/placares, herrajes, tornillería, placas de madera, telas, etc.).
+No te limites a comparar palabras sueltas como un procesador de texto común; debes RAZONAR el producto físico real que se está comprando:
+
+1. DESCOMPOSICIÓN TÉCNICA DE ATRIBUTOS (La Terna Esencial):
+   Para cada concepto de la factura, desglosa mentalmente:
+   a) TIPO DE PRODUCTO: (Ej: PERFIL H, SOPORTE, TORNILLO, ESCUADRA, POLIOL, PLACA, FITA BORDO).
+   b) DIMENSIÓN / MEDIDA FÍSICA: (Ej: 1920, 1630, 1710, 1845, 1330, 8X1/2, 15MM, D25, 6X).
+      * CRÍTICO: Distingue la medida física del artículo (ej: 1920 MM, 1630 MM) de la cantidad de empaque o varillas (ej: 1000 VARILLAS, 12000 VARILLAS).
+   c) COLOR / ACABADO / VARIANTE: (Ej: NOGAL, PINOT, BLANCO, CAOBA, TECA, ZINCADO).
+
+2. REGLA NUMÉRICA Y DE MEDIDAS:
+   - Si la factura contiene una medida, longitud, calibre o número técnico (ej: 1920, 1630), DEBES PRIORIZAR los artículos del catálogo que contienen ese MISMO NÚMERO.
+   - Si un artículo del catálogo coincide en Tipo + Medida exacta + Color (ej: Factura dice "PERFIL H NOGAL (1000 VARILLAS X 1920 MM)" y el catálogo tiene "Z6098 PERFIL H 1920 NOGAL"):
+     -> ES UN MATCH SEGURO AL 100% (confianza: "ALTA"), sin importar el orden de las palabras ni si la medida venía entre paréntesis o al final.
+
+3. INTERPRETACIÓN NATIVA DE ABREVIATURAS INDUSTRIALES Y DE TANGO:
+   Interpreta naturalmente las abreviaturas técnicas habituales sin requerir sinónimos manuales:
+   - SOP. / SOP = Soporte
+   - BCA / BCO = Blanco
+   - NGR / NEG = Negro
+   - CAB. HEX. / CAB HEX = Cabeza Hexagonal
+   - AUTOP. / AUTOP = Autoperforante
+   - ORIF. = Orificio
+   - PERF. = Perfil o Perforado
+   - CONJ = Conjunto
+   - ESP. = Espuma o Espesor
+   - D12, D16, D20, D25, D30, D35 = Densidad de espuma
+   - MM, CM, M, " = Unidades de longitud o diámetro
+
+4. CRITERIO DE ASIGNACIÓN Y CONFIANZA:
+   - "confianza": "ALTA" -> Coincidencia completa y segura.
+   - "confianza": "DUDOSA" -> En casos que no haya match seguro, debes asignar en "match_catalogo" el que mayor porcentaje de probabilidad tenga de ser el correcto (priorizando los que compartan más atributos como medida o familia).
+   - "opciones_probables": SIEMPRE que la confianza sea "DUDOSA" o haya alternativas posibles, es OBLIGATORIO devolver un arreglo con las 3 opciones más probables del catálogo maestro ordenadas de mayor a menor probabilidad.
+   - "confianza": "NO_ENCONTRADO" -> Si el artículo comprado claramente no pertenece ni existe en el catálogo.
+
+FORMATO ESTRICTO DE RESPUESTA:
+Devuelve ÚNICAMENTE un objeto JSON válido con este formato:
+{
+  "comprobante": {
+    "proveedor": "Nombre del proveedor",
+    "cuit": "30-xxxxxxxx-x",
+    "tipo": "FACTURA A",
+    "numero": "0001-00012345",
+    "fecha": "DD/MM/AAAA",
+    "total": 125000.50
+  },
+  "items": [
+    {
+      "item_nro": 1,
+      "factura_descripcion": "PERFIL H NEGRO (4000 VARILLAS X 1710 MM)",
+      "factura_codigo": null,
+      "cantidad": 4000,
+      "unidad_medida": "UN",
+      "precio_unitario": 431.60,
+      "subtotal": 1726400.00,
+      "match_catalogo": {
+        "codigo": "Z6100-6",
+        "descripcion": "PERFIL H 1710 BLANCO",
+        "confianza": "DUDOSA",
+        "motivo": "Misma medida (1710 mm), pero el color Negro no existe en catálogo. Se asigna la opción más cercana."
+      },
+      "opciones_probables": [
+        {
+          "codigo": "Z6100-6",
+          "descripcion": "PERFIL H 1710 BLANCO",
+          "probabilidad": "70%",
+          "motivo": "Misma medida 1710 mm"
+        },
+        {
+          "codigo": "Z6100-7",
+          "descripcion": "PERFIL H 1710 CHOCOLATE",
+          "probabilidad": "65%",
+          "motivo": "Misma medida 1710 mm"
+        },
+        {
+          "codigo": "Z6100-5",
+          "descripcion": "PERFIL H 1710 CAOBA",
+          "probabilidad": "50%",
+          "motivo": "Misma medida 1710 mm"
+        }
+      ]
+    }
+  ]
+}
+`;
+
+        const { data } = await callGeminiApiWithFallback({
+          prompt,
+          mimeType,
+          base64Data,
+          onStatusUpdate: (msg) => { statusDesc.textContent = msg; }
+        });
+
+        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+        const parsed = parseGeminiJsonResponse(rawText);
+
+        currentInvoiceData = parsed;
+        currentInvoiceData.fileName = currentFile.name;
+        currentInvoiceData.processedAt = new Date().toISOString();
+
+        displayInvoiceResults(parsed);
+        registerUnfoundItemsFromInvoice(parsed);
+
+        processingCard.classList.add('hidden');
+        resultsSection.classList.remove('hidden');
+        uploadSection.classList.remove('hidden');
+        lucide.createIcons();
+
+      } catch (err) {
+        console.error("Error en procesamiento:", err);
+        alert(`Error al procesar comprobante con IA: ${err.message}`);
+        processingCard.classList.add('hidden');
+        uploadSection.classList.remove('hidden');
+      }
+    }
+
+    // Visualización de Resultados Original
+    function displayInvoiceResults(data) {
+      const comp = data.comprobante || {};
+      document.getElementById('resTipoComprobante').textContent = comp.tipo || 'COMPROBANTE';
+      document.getElementById('resProveedor').textContent = comp.proveedor || 'Proveedor no identificado';
+      document.getElementById('resCuit').textContent = comp.cuit || 'S/D';
+      document.getElementById('resNumero').textContent = comp.numero || 'S/N';
+      document.getElementById('resFecha').textContent = comp.fecha || 'S/F';
+      document.getElementById('resTotal').textContent = formatCurrency(comp.total || 0);
+
+      renderItemsList();
+    }
+
+    function renderItemsList() {
+      const container = document.getElementById('itemsContainer');
+      container.innerHTML = '';
+
+      const items = currentInvoiceData.items || [];
+
+      let cAll = items.length;
+      let cExact = 0;
+      let cDoubt = 0;
+      let cNone = 0;
+
+      items.forEach(it => {
+        const conf = it.match_catalogo?.confianza;
+        if (conf === 'ALTA') cExact++;
+        else if (conf === 'DUDOSA' || conf === 'MEDIA' || conf === 'BAJA' || (it.opciones_probables && it.opciones_probables.length > 0 && conf !== 'NO_ENCONTRADO')) cDoubt++;
+        else cNone++;
+      });
+
+      document.getElementById('cntAll').textContent = cAll;
+      document.getElementById('cntExact').textContent = cExact;
+      document.getElementById('cntDoubt').textContent = cDoubt;
+      document.getElementById('cntNone').textContent = cNone;
+
+      items.forEach((it, idx) => {
+        const conf = it.match_catalogo?.confianza || 'NO_ENCONTRADO';
+        
+        if (activeFilter === 'exact' && conf !== 'ALTA') return;
+        if (activeFilter === 'doubt' && (conf === 'ALTA' || conf === 'NO_ENCONTRADO')) return;
+        if (activeFilter === 'none' && conf !== 'NO_ENCONTRADO') return;
+
+        const row = document.createElement('div');
+        row.className = "bg-white rounded-xl border border-slate-200 p-4 shadow-xs hover:border-slate-300 transition space-y-3";
+
+        const cant = it.cantidad || 1;
+        const pu = formatCurrency(it.precio_unitario || 0);
+        const st = formatCurrency(it.subtotal || 0);
+
+        let matchBadgeHtml = '';
+        if (conf === 'ALTA') {
+          matchBadgeHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Match Seguro
+          </span>`;
+        } else if (conf === 'DUDOSA' || conf === 'MEDIA' || conf === 'BAJA') {
+          matchBadgeHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Cotejo con Opciones
+          </span>`;
+        } else {
+          matchBadgeHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> No encontrado en Catálogo
+          </span>`;
+        }
+
+        let opcionesHtml = '';
+        const isDoubtful = (conf === 'DUDOSA' || conf === 'MEDIA' || conf === 'BAJA');
+        if (it.opciones_probables && it.opciones_probables.length > 0) {
+          // Filtrar la opción que ya se encuentra vinculada actualmente
+          const currentCode = it.match_catalogo?.codigo;
+          const otherOptions = it.opciones_probables.filter(op => op.codigo && op.codigo !== currentCode);
+
+          if (otherOptions.length > 0) {
+            opcionesHtml = `
+              <div class="mt-2 pt-2 border-t border-slate-100">
+                <p class="text-[11px] font-semibold text-slate-500 mb-1.5 flex items-center gap-1">
+                  <i data-lucide="sparkles" class="w-3 h-3 text-amber-500"></i>
+                  <span>Otras opciones sugeridas por Gemini (Haz clic para cambiar):</span>
+                </p>
+                <div class="flex flex-wrap gap-2">
+                  ${otherOptions.map(op => `
+                    <button onclick="assignOptionToItem(${idx}, '${escapeQuotes(op.codigo)}', '${escapeQuotes(op.descripcion)}')"
+                            class="px-2.5 py-1 rounded-lg border border-slate-200 hover:border-brand-500 bg-slate-50 hover:bg-brand-50 text-[11px] text-slate-700 hover:text-brand-700 font-medium transition flex items-center gap-1.5 shadow-2xs">
+                      <strong class="font-bold text-brand-700">${escapeHtml(op.codigo)}</strong>
+                      <span class="truncate max-w-[200px]">${escapeHtml(op.descripcion)}</span>
+                      <span class="px-1 py-0.2 rounded bg-slate-200 text-slate-600 font-bold text-[9px]">${escapeHtml(op.probabilidad || '')}</span>
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            `;
+          } else if (isDoubtful) {
+            const motivoText = it.match_catalogo?.motivo ? escapeHtml(it.match_catalogo.motivo) : 'Variante/color exacto no encontrado en catálogo (se asignó el más afín).';
+            opcionesHtml = `
+              <div class="mt-2 pt-2 border-t border-slate-100 flex items-center gap-2 text-amber-700 bg-amber-50/60 p-2 rounded-lg border border-amber-200/60 text-[11px]">
+                <i data-lucide="info" class="w-3.5 h-3.5 text-amber-600 shrink-0"></i>
+                <span class="flex-1 font-medium">${motivoText}</span>
+              </div>
+            `;
+          }
+        } else if (isDoubtful) {
+          const motivoText = it.match_catalogo?.motivo ? escapeHtml(it.match_catalogo.motivo) : 'Variante/color exacto no encontrado en catálogo (se asignó el más afín).';
+          opcionesHtml = `
+            <div class="mt-2 pt-2 border-t border-slate-100 flex items-center gap-2 text-amber-700 bg-amber-50/60 p-2 rounded-lg border border-amber-200/60 text-[11px]">
+              <i data-lucide="info" class="w-3.5 h-3.5 text-amber-600 shrink-0"></i>
+              <span class="flex-1 font-medium">${motivoText}</span>
+            </div>
+          `;
+        }
+
+        // Bloque de sugerencia de sinónimo al asignar o cambiar
+        let synonymBannerHtml = '';
+        if (it.suggestedSynonym && it.match_catalogo?.codigo) {
+          synonymBannerHtml = `
+            <div id="synBanner_${idx}" class="mt-2.5 p-2.5 bg-amber-50/80 border border-amber-200 rounded-xl text-xs space-y-2">
+              <div class="flex items-center gap-2 text-amber-900">
+                <i data-lucide="lightbulb" class="w-4 h-4 text-amber-600 shrink-0"></i>
+                <div>
+                  <span class="font-bold">¿Agregar a la columna Sinónimo en Catalogo de Articulos.xlsx?</span>
+                  <p class="text-[11px] text-amber-700">Para que futuras facturas con esta descripción se reconozcan automáticamente:</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <input type="text" id="synInput_${idx}" value="${escapeQuotes(it.suggestedSynonym)}" class="flex-1 px-2.5 py-1 bg-white border border-amber-300 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500">
+                <button onclick="saveSynonymDirectly('${escapeQuotes(it.match_catalogo.codigo)}', document.getElementById('synInput_${idx}').value, ${idx})"
+                        class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs rounded-lg shadow-2xs transition flex items-center gap-1 shrink-0">
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                  <span>Guardar en Excel</span>
+                </button>
+              </div>
+            </div>
+          `;
+        }
+
+        row.innerHTML = `
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-start space-x-3">
+              <span class="w-6 h-6 rounded-full bg-slate-100 text-slate-600 font-bold text-xs flex items-center justify-center shrink-0">
+                ${it.item_nro || idx + 1}
+              </span>
+              <div>
+                <p class="text-xs font-bold text-slate-900">${escapeHtml(it.factura_descripcion || 'Sin descripción')}</p>
+                <p class="text-[11px] text-slate-500 mt-0.5">
+                  Cant: <strong>${cant} ${escapeHtml(it.unidad_medida || '')}</strong> &bull; P. Unit: <strong>${pu}</strong> &bull; Subtotal: <strong class="text-slate-800">${st}</strong>
+                </p>
+              </div>
+            </div>
+            <div>${matchBadgeHtml}</div>
+          </div>
+
+          <div class="bg-slate-50 rounded-xl p-3 border border-slate-200/80 flex items-center justify-between text-xs">
+            <div class="flex items-center space-x-2 truncate">
+              <i data-lucide="link" class="w-4 h-4 text-brand-600 shrink-0"></i>
+              <div class="truncate">
+                <span class="text-[11px] text-slate-500">Artículo Vinculado:</span>
+                <p class="font-bold text-slate-900 truncate">
+                  ${it.match_catalogo?.codigo ? `<span class="text-brand-700 font-mono">[${escapeHtml(it.match_catalogo.codigo)}]</span> ${escapeHtml(it.match_catalogo.descripcion)}` : '<span class="text-slate-400 italic">Sin vincular</span>'}
+                </p>
+              </div>
+            </div>
+            <button onclick="openManualAssignModal(${idx})" class="px-2.5 py-1 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg text-slate-700 text-[11px] font-semibold transition shrink-0 ml-2 shadow-2xs">
+              Cambiar
+            </button>
+          </div>
+
+          ${opcionesHtml}
+          ${synonymBannerHtml}
+        `;
+
+        container.appendChild(row);
+      });
+
+      lucide.createIcons();
+    }
+
+    function filterItems(type) {
+      activeFilter = type;
+      ['all', 'exact', 'doubt', 'none'].forEach(t => {
+        const btn = document.getElementById('btnFilter' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (t === type) {
+          btn.className = "px-2.5 py-1 rounded-lg font-medium bg-slate-200 text-slate-800";
+        } else {
+          btn.className = "px-2.5 py-1 rounded-lg font-medium text-slate-600 hover:bg-slate-100";
+        }
+      });
+      renderItemsList();
+    }
+
+    function assignOptionToItem(idx, codigo, descripcion) {
+      if (!currentInvoiceData || !currentInvoiceData.items[idx]) return;
+      const item = currentInvoiceData.items[idx];
+      item.match_catalogo = {
+        codigo: codigo,
+        descripcion: descripcion,
+        confianza: 'ALTA',
+        motivo: 'Asignado por el usuario'
+      };
+      // Sugerencia de palabra clave para sinónimo en Catalogo de Articulos.xlsx
+      item.suggestedSynonym = extractSuggestedKeyword(item.factura_descripcion, { codigo, descripcion });
+      renderItemsList();
+    }
+
+    function extractSuggestedKeyword(invoiceDesc, catalogItem) {
+      if (!invoiceDesc) return (catalogItem.descripcion || '').toUpperCase();
+      const norm = invoiceDesc.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9\s]/g, " ").trim();
+      const STOPWORDS = new Set([
+        'de', 'del', 'la', 'las', 'el', 'los', 'un', 'una', 'unos', 'para', 'por', 'con', 'sin', 'en', 'y', 'x',
+        'tambor', 'tambores', 'rollo', 'rollos', 'caja', 'cajas', 'kg', 'kilos', 'lts', 'litros', 'mts', 'metros',
+        'un', 'unid', 'unidades', 'pack', 'lote', 'bolsa', 'balde', 'art', 'cod', 'item', 'precio', 'total', 'subtotal'
+      ]);
+      const tokens = norm.split(/[\s,.-]+/).filter(t => t.length > 1 && !STOPWORDS.has(t) && !/^\d+$/.test(t));
+      const cleanTokens = tokens.filter(t => !/^\d+(?:kg|gr|lt|lts|un|mts|cm|mm|%|cc)?$/i.test(t));
+      if (cleanTokens.length === 0) return (catalogItem.descripcion || '').toUpperCase();
+      return cleanTokens.slice(0, 3).join(' ').toUpperCase();
+    }
+
+    async function saveSynonymDirectly(codigo, newSynonym, itemIdx) {
+      if (!codigo || !newSynonym || !newSynonym.trim()) {
+        alert("Por favor indica una palabra clave válida.");
+        return;
+      }
+      const cleanSyn = newSynonym.trim();
+      // Actualizar en memoria y Supabase
+      const item = fullCatalog.find(x => x.codigo === codigo);
+      if (item) {
+        item.sinonimo = item.sinonimo ? `${item.sinonimo}, ${cleanSyn}` : cleanSyn;
+        saveSupabaseState({ catalog: fullCatalog, count: fullCatalog.length });
+      }
+
+      try {
+        const res = await fetch('/api/catalog/add-synonym', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ codigo, sinonimo: cleanSyn })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(`✅ Guardado: se agregó el sinónimo "${cleanSyn}" al código ${codigo}.`);
+        }
+      } catch (err) {
+        console.warn("Servidor local no disponible para escribir Excel físico, guardado en nube.");
+        alert(`✅ Guardado en la nube: se agregó el sinónimo "${cleanSyn}" al código ${codigo}.`);
+      }
+
+      await fetchCatalog(true);
+      const banner = document.getElementById('synBanner_' + itemIdx);
+      if (banner) {
+        banner.innerHTML = `
+          <div class="flex items-center gap-1.5 text-emerald-700 font-bold py-1">
+            <i data-lucide="check" class="w-4 h-4"></i>
+            <span>¡Sinónimo guardado y sincronizado!</span>
+          </div>
+        `;
+        lucide.createIcons();
+      }
+    }
+
+    function openManualAssignModal(idx) {
+      activeAssignItemIndex = idx;
+      const it = currentInvoiceData.items[idx];
+      document.getElementById('modalItemFacturaDesc').textContent = it.factura_descripcion || '';
+      document.getElementById('modalSearchCatalog').value = '';
+      document.getElementById('manualAssignModal').classList.remove('hidden');
+      searchCatalogInModal();
+      document.getElementById('modalSearchCatalog').focus();
+    }
+
+    function closeManualAssignModal() {
+      document.getElementById('manualAssignModal').classList.add('hidden');
+      activeAssignItemIndex = null;
+    }
+
+    function searchCatalogInModal() {
+      const q = document.getElementById('modalSearchCatalog').value.toLowerCase().trim();
+      const container = document.getElementById('modalCatalogResults');
+      container.innerHTML = '';
+
+      let results = [];
+      if (!q.trim()) {
+        results = fullCatalog.slice(0, 15);
+      } else {
+        results = fullCatalog.filter(it => itemMatchesQuery(it, q)).slice(0, 30);
+      }
+
+      if (results.length === 0) {
+        container.innerHTML = `<p class="text-slate-400 italic text-center py-4">No se encontraron artículos con "${escapeHtml(q)}"</p>`;
+        return;
+      }
+
+      results.forEach(it => {
+        const itemDiv = document.createElement('div');
+        itemDiv.className = "p-2 hover:bg-brand-50 rounded-lg cursor-pointer flex items-center justify-between transition";
+        itemDiv.onclick = () => {
+          assignOptionToItem(activeAssignItemIndex, it.codigo, it.descripcion);
+          closeManualAssignModal();
+        };
+        itemDiv.innerHTML = `
+          <div>
+            <span class="font-bold text-brand-700 font-mono">${escapeHtml(it.codigo)}</span>
+            <p class="text-slate-800">${escapeHtml(it.descripcion)}</p>
+            ${it.sinonimo ? `<p class="text-[10px] text-slate-400">Sinónimo: ${escapeHtml(it.sinonimo)}</p>` : ''}
+          </div>
+          <span class="text-[10px] text-brand-600 font-semibold">Seleccionar</span>
+        `;
+        container.appendChild(itemDiv);
+      });
+    }
+
+    function clearItemAssignment() {
+      if (activeAssignItemIndex !== null && currentInvoiceData?.items[activeAssignItemIndex]) {
+        currentInvoiceData.items[activeAssignItemIndex].match_catalogo = {
+          codigo: null,
+          descripcion: null,
+          confianza: 'NO_ENCONTRADO',
+          motivo: 'Sin vincular'
+        };
+        renderItemsList();
+      }
+      closeManualAssignModal();
+    }
+
+    async function renderDocumentPreview(file) {
+      const pdfCanvas = document.getElementById('pdfCanvas');
+      const imgPreview = document.getElementById('imgPreview');
+      const pdfControls = document.getElementById('pdfControls');
+
+      pdfCanvas.classList.add('hidden');
+      imgPreview.classList.add('hidden');
+      pdfControls.classList.add('hidden');
+
+      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        const arrayBuffer = await file.arrayBuffer();
+        currentPdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        currentPdfPage = 1;
+        pdfControls.classList.remove('hidden');
+        renderPdfPage(currentPdfPage);
+      } else {
+        const url = URL.createObjectURL(file);
+        imgPreview.src = url;
+        imgPreview.classList.remove('hidden');
+      }
+    }
+
+    async function renderPdfPage(pageNo) {
+      if (!currentPdfDoc) return;
+      const page = await currentPdfDoc.getPage(pageNo);
+      const canvas = document.getElementById('pdfCanvas');
+      const ctx = canvas.getContext('2d');
+      const viewport = page.getViewport({ scale: 1.5 });
+
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+      canvas.classList.remove('hidden');
+
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      document.getElementById('pdfPageNum').textContent = `${pageNo} / ${currentPdfDoc.numPages}`;
+    }
+
+    function prevPdfPage() {
+      if (currentPdfDoc && currentPdfPage > 1) {
+        currentPdfPage--;
+        renderPdfPage(currentPdfPage);
+      }
+    }
+
+    function nextPdfPage() {
+      if (currentPdfDoc && currentPdfPage < currentPdfDoc.numPages) {
+        currentPdfPage++;
+        renderPdfPage(currentPdfPage);
+      }
+    }
+
+    async function saveCurrentInvoiceToHistory() {
+      if (!currentInvoiceData) return;
+      try {
+        await registerUnfoundItemsFromInvoice(currentInvoiceData);
+        const res = await fetch('/api/history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(currentInvoiceData)
+        });
+        alert("✅ Comprobante y sugerencias registradas correctamente.");
+        loadUnfoundItems();
+      } catch (err) {
+        alert("Error al guardar: " + err.message);
+      }
+    }
+
+    async function exportCurrentInvoiceToExcel() {
+      if (!currentInvoiceData) return;
+      try {
+        const res = await fetch('/api/export-excel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invoice: currentInvoiceData })
+        });
+        if (!res.ok) throw new Error("Error en servidor");
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Cotejo_Factura_${(currentInvoiceData.comprobante?.numero || 'export').replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } catch (e) {
+        alert("Error al exportar Excel: " + e.message);
+      }
+    }
+
+    // ==========================================
+    // ARTÍCULOS NO ENCONTRADOS (SUGERENCIAS PARA CATÁLOGO)
+    // ==========================================
+    let unfoundItemsList = [];
+    let currentUnfoundFilter = 'all';
+
+    async function loadUnfoundItems(forceRefresh = false) {
+      // 1. Intentar Supabase Cloud
+      const cloudState = await fetchSupabaseState();
+      if (cloudState && Array.isArray(cloudState.unfoundItems)) {
+        unfoundItemsList = cloudState.unfoundItems;
+        updateUnfoundBadges();
+        renderUnfoundTable();
+        return;
+      }
+
+      // 2. Fallback a servidor local
+      try {
+        const res = await fetch('/api/unfound-items' + (forceRefresh ? '?t=' + Date.now() : ''));
+        const data = await res.json();
+        if (data.success && Array.isArray(data.items)) {
+          unfoundItemsList = data.items;
+          updateUnfoundBadges();
+          renderUnfoundTable();
+        }
+      } catch (err) {
+        console.warn("No se pudo cargar artículos no encontrados localmente.");
+      }
+    }
+
+    function updateUnfoundBadges() {
+      const total = unfoundItemsList.length;
+      const badgeNav = document.getElementById('tabUnfoundBadge');
+      const badgeTitle = document.getElementById('unfoundCountBadge');
+
+      if (badgeNav) badgeNav.textContent = total;
+      if (badgeTitle) badgeTitle.textContent = `${total} artículo${total === 1 ? '' : 's'}`;
+    }
+
+    function filterUnfoundItems() {
+      renderUnfoundTable();
+    }
+
+    function renderUnfoundTable() {
+      const tbody = document.getElementById('unfoundTableBody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+
+      const query = (document.getElementById('unfoundSearchInput')?.value || '').trim().toLowerCase();
+
+      let items = unfoundItemsList.filter(item => {
+        if (query) {
+          const matchDesc = (item.descripcionFactura || '').toLowerCase().includes(query);
+          const matchProv = (item.proveedor || '').toLowerCase().includes(query) || (item.proveedores || []).some(p => p.toLowerCase().includes(query));
+          const matchComp = (item.comprobanteOrigen || '').toLowerCase().includes(query);
+          return matchDesc || matchProv || matchComp;
+        }
+        return true;
+      });
+
+      if (items.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="7" class="text-center py-8 text-slate-400 italic text-xs">
+              <i data-lucide="inbox" class="w-6 h-6 mx-auto mb-1.5 text-slate-300"></i>
+              No hay artículos no encontrados registrados.
+            </td>
+          </tr>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      items.forEach(it => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-50/80 transition text-xs";
+
+        const dateStr = it.fechaDeteccion ? new Date(it.fechaDeteccion).toLocaleDateString() : '-';
+        const priceStr = it.ultimoPrecio ? formatCurrency(it.ultimoPrecio) : '-';
+
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 font-semibold text-slate-900 max-w-[280px]">
+            <div class="truncate" title="${escapeQuotes(it.descripcionFactura)}">${escapeHtml(it.descripcionFactura)}</div>
+            ${it.unidadMedida ? `<span class="text-[10px] text-slate-400 font-normal">Unidad: ${escapeHtml(it.unidadMedida)}</span>` : ''}
+          </td>
+          <td class="py-2.5 px-3 text-slate-600 max-w-[180px]">
+            <div class="truncate font-medium">${escapeHtml(it.proveedores?.join(', ') || it.proveedor || 'Sin especificar')}</div>
+          </td>
+          <td class="py-2.5 px-3 text-slate-500 text-[11px] max-w-[140px]">
+            <div class="truncate font-mono">${escapeHtml(it.comprobanteOrigen || '-')}</div>
+          </td>
+          <td class="py-2.5 px-3 font-mono font-medium text-slate-700">${priceStr}</td>
+          <td class="py-2.5 px-3 text-center">
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${it.apariciones > 1 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}">
+              ${it.apariciones || 1} ${it.apariciones === 1 ? 'vez' : 'veces'}
+            </span>
+          </td>
+          <td class="py-2.5 px-3 text-slate-500 text-[11px] whitespace-nowrap">${dateStr}</td>
+          <td class="py-2.5 px-3 text-right whitespace-nowrap">
+            <button onclick="deleteUnfoundItem('${it.id}')" 
+                    class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition" 
+                    title="Eliminar este artículo del registro">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      lucide.createIcons();
+    }
+
+    async function deleteUnfoundItem(id) {
+      if (!confirm("¿Deseas quitar este artículo de la lista?")) return;
+      unfoundItemsList = unfoundItemsList.filter(x => x.id !== id);
+      saveSupabaseState({ unfoundItems: unfoundItemsList });
+      updateUnfoundBadges();
+      renderUnfoundTable();
+
+      try {
+        await fetch('/api/unfound-items/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+      } catch (err) {}
+    }
+
+    async function clearAllUnfoundItems() {
+      if (unfoundItemsList.length === 0) {
+        alert("No hay artículos no encontrados registrados.");
+        return;
+      }
+      if (!confirm("¿Estás seguro de que deseas vaciar toda la lista?")) return;
+      unfoundItemsList = [];
+      saveSupabaseState({ unfoundItems: [] });
+      updateUnfoundBadges();
+      renderUnfoundTable();
+
+      try {
+        await fetch('/api/unfound-items/clear', { method: 'POST' });
+      } catch (err) {}
+    }
+
+    async function registerUnfoundItemsFromInvoice(invoice) {
+      if (!invoice || !Array.isArray(invoice.items)) return;
+      const unfound = invoice.items.filter(it => {
+        const conf = it.match_catalogo?.confianza;
+        return conf === 'NO_ENCONTRADO' || !it.match_catalogo?.codigo;
+      });
+
+      if (unfound.length === 0) return;
+
+      const payloadItems = unfound.map(it => ({
+        descripcionFactura: it.factura_descripcion || '',
+        proveedor: invoice.comprobante?.proveedor || '',
+        comprobanteOrigen: `${invoice.comprobante?.tipo || 'FC'} ${invoice.comprobante?.numero || ''}`.trim(),
+        unidadMedida: it.unidad_medida || 'UN',
+        precioUnitario: it.precio_unitario || 0
+      }));
+
+      // Actualizar en memoria y Supabase
+      payloadItems.forEach(newItem => {
+        if (!newItem.descripcionFactura || !newItem.descripcionFactura.trim()) return;
+        const descNorm = newItem.descripcionFactura.trim().toLowerCase();
+        const existing = unfoundItemsList.find(x => x.descripcionFactura.trim().toLowerCase() === descNorm);
+        if (existing) {
+          existing.apariciones = (existing.apariciones || 1) + 1;
+          existing.ultimaFecha = new Date().toISOString();
+          if (newItem.proveedor && !existing.proveedores?.includes(newItem.proveedor)) {
+            if (!existing.proveedores) existing.proveedores = [existing.proveedor].filter(Boolean);
+            existing.proveedores.push(newItem.proveedor);
+          }
+          if (newItem.precioUnitario) existing.ultimoPrecio = newItem.precioUnitario;
+        } else {
+          unfoundItemsList.unshift({
+            id: 'unf-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+            descripcionFactura: newItem.descripcionFactura.trim(),
+            proveedor: newItem.proveedor || '',
+            proveedores: newItem.proveedor ? [newItem.proveedor] : [],
+            unidadMedida: newItem.unidadMedida || 'UN',
+            ultimoPrecio: newItem.precioUnitario || 0,
+            comprobanteOrigen: newItem.comprobanteOrigen || '',
+            fechaDeteccion: new Date().toISOString(),
+            ultimaFecha: new Date().toISOString(),
+            apariciones: 1
+          });
+        }
+      });
+      saveSupabaseState({ unfoundItems: unfoundItemsList });
+      updateUnfoundBadges();
+      renderUnfoundTable();
+
+      try {
+        await fetch('/api/unfound-items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: payloadItems })
+        });
+      } catch (err) {}
+    }
+
+    async function logApiCall(entry) {
+      try {
+        await fetch('/api/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(entry)
+        });
+        loadLogs();
+      } catch (e) {
+        console.warn("No se pudo registrar log:", e);
+      }
+    }
+
+    async function loadLogs() {
+      try {
+        const res = await fetch('/api/history');
+        const data = await res.json();
+        const tbody = document.getElementById('logsTableBody');
+        tbody.innerHTML = '';
+
+        const logs = data.logs || [];
+        if (logs.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" class="py-4 text-center text-slate-400 italic">No hay llamadas registradas aún.</td></tr>`;
+          return;
+        }
+
+        logs.forEach(l => {
+          const tr = document.createElement('tr');
+          tr.className = "hover:bg-slate-50 transition";
+          tr.innerHTML = `
+            <td class="py-2.5 px-3 text-slate-500 font-mono">${new Date(l.timestamp).toLocaleString()}</td>
+            <td class="py-2.5 px-3 font-semibold text-slate-800">${escapeHtml(l.documento || '-')}</td>
+            <td class="py-2.5 px-3">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold ${l.usedKeyName.includes('Paga') ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}">
+                ${escapeHtml(l.usedKeyName || '')}
+              </span>
+            </td>
+            <td class="py-2.5 px-3 font-mono">${l.tokensIn || 0}</td>
+            <td class="py-2.5 px-3 font-mono">${l.tokensOut || 0}</td>
+            <td class="py-2.5 px-3 font-mono">${l.tiempo || '-'}</td>
+            <td class="py-2.5 px-3 font-bold text-emerald-600">${l.status || '200 OK'}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error("Error al cargar logs:", e);
+      }
+    }
+
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function parseGeminiJsonResponse(rawText) {
+      try {
+        let clean = rawText.trim();
+        if (clean.startsWith('```json')) clean = clean.slice(7);
+        if (clean.startsWith('```')) clean = clean.slice(3);
+        if (clean.endsWith('```')) clean = clean.slice(0, -3);
+        return JSON.parse(clean.trim());
+      } catch (e) {
+        console.error("Error parseando JSON de Gemini:", rawText);
+        throw new Error("La respuesta de Gemini no tiene formato JSON válido.");
+      }
+    }
+
+    function formatCurrency(val) {
+      return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(val);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function escapeQuotes(str) {
+      if (!str) return '';
+      return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    }
+
+    function openApiKeyModal() {
+      document.getElementById('apiKeyModal').classList.remove('hidden');
+    }
+
+    function closeApiKeyModal() {
+      document.getElementById('apiKeyModal').classList.add('hidden');
+    }
+
+
+    // ==========================================
+    // ACTUALIZACIÓN DESDE EXPORTACIÓN DE TANGO
+    // ==========================================
+    let pendingTangoSyncNewItems = [];
+    let pendingTangoSyncModifiedItems = [];
+
+    async function handleTangoCatalogFileSelect(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames.includes('Artículos') ? 'Artículos' : workbook.SheetNames[0];
+        const ws = workbook.Sheets[sheetName];
+        if (!ws) {
+          throw new Error("No se pudo encontrar una hoja válida en el archivo.");
+        }
+
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        if (!rows || rows.length < 2) {
+          throw new Error("El archivo no contiene filas de datos.");
+        }
+
+        // Buscar índices de columnas en la fila de encabezados
+        const headers = rows[0].map(h => String(h || '').toLowerCase().trim());
+        let codCol = headers.findIndex(h => h.includes('cód') || h.includes('cod'));
+        let descCol = headers.findIndex(h => h.includes('descripción') && !h.includes('adicional'));
+        let addCol = headers.findIndex(h => h.includes('adicional'));
+
+        if (codCol === -1) codCol = 0;
+        if (descCol === -1) descCol = 1;
+        if (addCol === -1) addCol = 2;
+
+        // Mapear catálogo actual en memoria
+        const currentMap = new Map();
+        fullCatalog.forEach(it => {
+          if (it.codigo) {
+            currentMap.set(String(it.codigo).trim().toLowerCase(), it);
+          }
+        });
+
+        let totalRows = rows.length - 1;
+        let zCount = 0;
+        let unchangedCount = 0;
+        pendingTangoSyncNewItems = [];
+        pendingTangoSyncModifiedItems = [];
+
+        for (let r = 1; r < rows.length; r++) {
+          const row = rows[r];
+          if (!row || row.length === 0) continue;
+
+          const rawCode = row[codCol];
+          if (rawCode === undefined || rawCode === null) continue;
+
+          const codeStr = String(rawCode).trim();
+          if (!codeStr.toUpperCase().startsWith('Z')) {
+            // Ignorar todo lo que no empiece con Z
+            continue;
+          }
+
+          zCount++;
+          const descStr = String(row[descCol] || '').trim();
+          const adicStr = String(row[addCol] || '').trim();
+          const key = codeStr.toLowerCase();
+
+          if (!currentMap.has(key)) {
+            // Artículo nuevo
+            pendingTangoSyncNewItems.push({
+              codigo: codeStr,
+              descripcion: descStr,
+              adicional: adicStr
+            });
+          } else {
+            // Artículo existente: comparar descripción y adicional
+            const curr = currentMap.get(key);
+            const currDesc = String(curr.descripcion || '').trim();
+            const currAdic = String(curr.adicional || '').trim();
+
+            const diffs = [];
+            if (currDesc !== descStr) {
+              diffs.push({ campo: 'Descripción Principal', actual: currDesc, nuevo: descStr });
+            }
+            if (currAdic !== adicStr) {
+              diffs.push({ campo: 'Descripción Adicional', actual: currAdic, nuevo: adicStr });
+            }
+
+            if (diffs.length > 0) {
+              pendingTangoSyncModifiedItems.push({
+                codigo: codeStr,
+                descripcion: descStr,
+                adicional: adicStr,
+                diffs
+              });
+            } else {
+              unchangedCount++;
+            }
+          }
+        }
+
+        renderTangoSyncModal(totalRows, zCount, unchangedCount);
+
+      } catch (err) {
+        console.error("Error al procesar archivo de Tango:", err);
+        alert("Error al leer el archivo Excel de Tango: " + err.message);
+      } finally {
+        event.target.value = '';
+      }
+    }
+
+    function renderTangoSyncModal(totalRows, zCount, unchangedCount) {
+      document.getElementById('statTangoTotalRows').textContent = totalRows.toLocaleString();
+      document.getElementById('statTangoZCount').textContent = zCount.toLocaleString();
+      document.getElementById('statTangoNewCount').textContent = pendingTangoSyncNewItems.length.toLocaleString();
+      document.getElementById('statTangoModCount').textContent = pendingTangoSyncModifiedItems.length.toLocaleString();
+
+      document.getElementById('badgeTabSyncMods').textContent = pendingTangoSyncModifiedItems.length;
+      document.getElementById('badgeTabSyncNews').textContent = pendingTangoSyncNewItems.length;
+
+      // Renderizar tabla de modificaciones
+      const tbodyMods = document.getElementById('tableBodySyncMods');
+      tbodyMods.innerHTML = '';
+      pendingTangoSyncModifiedItems.forEach(item => {
+        item.diffs.forEach(diff => {
+          const tr = document.createElement('tr');
+          tr.className = 'hover:bg-amber-50/50 transition';
+          tr.innerHTML = `
+            <td class="py-2 px-3 font-mono font-bold text-brand-700">${escapeHtml(item.codigo)}</td>
+            <td class="py-2 px-3 font-semibold text-slate-700 text-[11px]">${escapeHtml(diff.campo)}</td>
+            <td class="py-2 px-3 text-slate-500 border-r border-slate-100">${escapeHtml(diff.actual || '-')}</td>
+            <td class="py-2 px-3 text-indigo-900 font-semibold bg-indigo-50/40">${escapeHtml(diff.nuevo || '-')}</td>
+          `;
+          tbodyMods.appendChild(tr);
+        });
+      });
+
+      // Renderizar tabla de nuevos artículos
+      const tbodyNews = document.getElementById('tableBodySyncNews');
+      tbodyNews.innerHTML = '';
+      pendingTangoSyncNewItems.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-emerald-50/50 transition';
+        tr.innerHTML = `
+          <td class="py-2 px-3 font-mono font-bold text-brand-700">${escapeHtml(item.codigo)}</td>
+          <td class="py-2 px-3 text-slate-800 font-medium">${escapeHtml(item.descripcion)}</td>
+          <td class="py-2 px-3 text-slate-600">${escapeHtml(item.adicional || '-')}</td>
+        `;
+        tbodyNews.appendChild(tr);
+      });
+
+      const hasChanges = pendingTangoSyncNewItems.length > 0 || pendingTangoSyncModifiedItems.length > 0;
+      const noChangesNotice = document.getElementById('syncNoChangesNotice');
+      const viewMods = document.getElementById('viewSyncMods');
+      const viewNews = document.getElementById('viewSyncNews');
+      const btnApply = document.getElementById('btnApplyTangoSync');
+      const btnApplyText = document.getElementById('btnApplyTangoSyncText');
+
+      if (!hasChanges) {
+        noChangesNotice.classList.remove('hidden');
+        viewMods.classList.add('hidden');
+        viewNews.classList.add('hidden');
+        btnApply.disabled = true;
+        btnApply.className = "px-4 py-2 bg-slate-200 text-slate-400 text-xs font-bold rounded-xl cursor-not-allowed";
+        btnApplyText.textContent = "Catálogo al día (Sin diferencias)";
+      } else {
+        noChangesNotice.classList.add('hidden');
+        btnApply.disabled = false;
+        btnApply.className = "px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs";
+        btnApplyText.textContent = `Aplicar Actualización (${pendingTangoSyncNewItems.length} nuevos, ${pendingTangoSyncModifiedItems.length} modificados)`;
+
+        if (pendingTangoSyncModifiedItems.length > 0) {
+          switchSyncViewTab('mods');
+        } else {
+          switchSyncViewTab('news');
+        }
+      }
+
+      document.getElementById('modalTangoSync').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function switchSyncViewTab(tab) {
+      const btnMods = document.getElementById('btnTabSyncMods');
+      const btnNews = document.getElementById('btnTabSyncNews');
+      const viewMods = document.getElementById('viewSyncMods');
+      const viewNews = document.getElementById('viewSyncNews');
+
+      if (tab === 'mods') {
+        btnMods.className = "px-3 py-1.5 font-bold border-b-2 border-amber-600 text-amber-800 flex items-center gap-1.5 transition";
+        btnNews.className = "px-3 py-1.5 font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 flex items-center gap-1.5 transition";
+        viewMods.classList.remove('hidden');
+        viewNews.classList.add('hidden');
+      } else {
+        btnNews.className = "px-3 py-1.5 font-bold border-b-2 border-emerald-600 text-emerald-800 flex items-center gap-1.5 transition";
+        btnMods.className = "px-3 py-1.5 font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 flex items-center gap-1.5 transition";
+        viewNews.classList.remove('hidden');
+        viewMods.classList.add('hidden');
+      }
+    }
+
+    function closeTangoSyncModal() {
+      document.getElementById('modalTangoSync').classList.add('hidden');
+    }
+
+    async function applyTangoSync() {
+      const btnApply = document.getElementById('btnApplyTangoSync');
+      const origHtml = btnApply.innerHTML;
+      btnApply.disabled = true;
+      btnApply.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span>Guardando en Excel...</span>`;
+      lucide.createIcons();
+
+      try {
+        const payload = {
+          newItems: pendingTangoSyncNewItems,
+          modifiedItems: pendingTangoSyncModifiedItems.map(m => ({
+            codigo: m.codigo,
+            descripcion: m.descripcion,
+            adicional: m.adicional
+          }))
+        };
+
+        // 1. Actualizar en memoria y en Supabase (para la nube)
+        const modMap = new Map();
+        payload.modifiedItems.forEach(it => modMap.set(it.codigo.toLowerCase(), it));
+
+        fullCatalog.forEach(it => {
+          const mod = modMap.get((it.codigo || '').toLowerCase());
+          if (mod) {
+            it.descripcion = mod.descripcion;
+            it.adicional = mod.adicional;
+          }
+        });
+
+        payload.newItems.forEach(it => {
+          fullCatalog.push({
+            codigo: it.codigo,
+            descripcion: it.descripcion,
+            adicional: it.adicional || '',
+            sinonimo: ''
+          });
+        });
+
+        await saveSupabaseState({ catalog: fullCatalog, count: fullCatalog.length });
+
+        // 2. Intentar actualizar en backend local / Catalogo de Articulos.xlsx
+        try {
+          const res = await fetch('/api/catalog/sync-tango', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if (data && data.message) {
+            alert(data.message);
+          } else {
+            alert(`¡Catálogo actualizado con éxito! (${payload.newItems.length} nuevos, ${payload.modifiedItems.length} modificados)`);
+          }
+        } catch (localErr) {
+          alert(`¡Catálogo actualizado en la nube con éxito! (${payload.newItems.length} nuevos, ${payload.modifiedItems.length} modificados)`);
+        }
+
+        closeTangoSyncModal();
+        await fetchCatalog(true);
+
+      } catch (err) {
+        console.error("Error al aplicar actualización de Tango:", err);
+        alert("Error al aplicar actualización: " + err.message);
+      } finally {
+        btnApply.disabled = false;
+        btnApply.innerHTML = origHtml;
+        lucide.createIcons();
+      }
+    }
+
+    function toggleKeyVisibility(inputId) {
+      const input = document.getElementById(inputId);
+      input.type = input.type === 'password' ? 'text' : 'password';
+    }
+
+    // ==========================================
+    // MODAL FLOTANTE Y COPIADO PARA TANGO
+    // ==========================================
+    let tangoPipWindow = null;
+    let isTangoDraggableInitialized = false;
+
+    function initTangoDraggable() {
+      const modal = document.getElementById('modalTangoFloating');
+      const header = document.getElementById('modalTangoHeader');
+      if (!modal || !header || isTangoDraggableInitialized) return;
+
+      let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+      header.onmousedown = function(e) {
+        if (e.target.closest('button') || e.target.closest('input') || e.target.closest('label')) return;
+        e.preventDefault();
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        document.onmouseup = closeDrag;
+        document.onmousemove = doDrag;
+      };
+
+      function doDrag(e) {
+        e.preventDefault();
+        pos1 = pos3 - e.clientX;
+        pos2 = pos4 - e.clientY;
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        const newTop = Math.max(10, Math.min(window.innerHeight - 80, modal.offsetTop - pos2));
+        const newLeft = Math.max(10, Math.min(window.innerWidth - 100, modal.offsetLeft - pos1));
+        modal.style.top = newTop + 'px';
+        modal.style.left = newLeft + 'px';
+      }
+
+      function closeDrag() {
+        document.onmouseup = null;
+        document.onmousemove = null;
+      }
+
+      isTangoDraggableInitialized = true;
+    }
+
+    function openTangoFloatingModal() {
+      if (!currentInvoiceData || !currentInvoiceData.items || currentInvoiceData.items.length === 0) {
+        alert("Primero procesa o carga una factura para poder visualizar los artículos vinculados.");
+        return;
+      }
+
+      const comp = currentInvoiceData.comprobante || {};
+      const provElem = document.getElementById('tangoModalProveedor');
+      const compElem = document.getElementById('tangoModalComprobante');
+      if (provElem) provElem.textContent = comp.proveedor || 'Proveedor no identificado';
+      if (compElem) compElem.textContent = (comp.tipo ? comp.tipo + ' ' : '') + (comp.numero || 'S/N');
+
+      renderTangoTable();
+
+      const modal = document.getElementById('modalTangoFloating');
+      modal.classList.remove('hidden');
+      initTangoDraggable();
+      lucide.createIcons();
+    }
+
+    function closeTangoFloatingModal() {
+      const modal = document.getElementById('modalTangoFloating');
+      if (modal) modal.classList.add('hidden');
+      if (tangoPipWindow) {
+        try { tangoPipWindow.close(); } catch(e) {}
+        tangoPipWindow = null;
+      }
+      const chk = document.getElementById('chkTangoAlwaysOnTop');
+      if (chk) chk.checked = false;
+    }
+
+    function renderTangoTable() {
+      const tbody = document.getElementById('tangoTableBody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+
+      const items = currentInvoiceData?.items || [];
+      const linkedItems = items.filter(it => it.match_catalogo && it.match_catalogo.codigo);
+      const unlinkedItems = items.filter(it => !it.match_catalogo || !it.match_catalogo.codigo);
+
+      const countBadge = document.getElementById('tangoItemCountBadge');
+      if (countBadge) {
+        countBadge.textContent = `${linkedItems.length} de ${items.length} vinculados`;
+      }
+
+      if (items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="2" class="p-4 text-center text-slate-400 italic">No hay artículos cargados</td></tr>`;
+        return;
+      }
+
+      // Renderizar primero los vinculados
+      linkedItems.forEach((it, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-indigo-50/40 transition group";
+        
+        const cant = it.cantidad || 1;
+        const pu = formatCurrency(it.precio_unitario || 0);
+
+        tr.innerHTML = `
+          <td class="p-3 border-r border-slate-100 align-top">
+            <p class="font-bold text-slate-900 leading-snug">${escapeHtml(it.factura_descripcion || 'Sin descripción')}</p>
+            <p class="text-[11px] text-slate-500 mt-1">
+              Cant: <strong class="text-slate-700">${cant} ${escapeHtml(it.unidad_medida || '')}</strong> &bull; P.U: <strong class="text-slate-700">${pu}</strong>
+            </p>
+          </td>
+          <td class="p-3 align-top">
+            <div class="flex items-start justify-between gap-1.5">
+              <div class="space-y-0.5">
+                <button onclick="copyTangoCode('${escapeQuotes(it.match_catalogo.codigo)}')" 
+                        class="inline-flex items-center gap-1.5 font-mono font-bold text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-900 border border-indigo-200 px-2 py-0.5 rounded-lg transition shadow-2xs group-hover:border-indigo-300" 
+                        title="Clic para copiar este código a Tango">
+                  <span>${escapeHtml(it.match_catalogo.codigo)}</span>
+                  <i data-lucide="copy" class="w-3 h-3 text-indigo-500"></i>
+                </button>
+                <p class="text-xs font-semibold text-slate-800 leading-snug mt-1">${escapeHtml(it.match_catalogo.descripcion)}</p>
+              </div>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Renderizar no vinculados si hubiera
+      unlinkedItems.forEach((it, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = "bg-rose-50/30 hover:bg-rose-50/50 transition";
+        const cant = it.cantidad || 1;
+        const pu = formatCurrency(it.precio_unitario || 0);
+
+        tr.innerHTML = `
+          <td class="p-3 border-r border-slate-100 align-top">
+            <p class="font-bold text-slate-900 leading-snug">${escapeHtml(it.factura_descripcion || 'Sin descripción')}</p>
+            <p class="text-[11px] text-slate-500 mt-1">
+              Cant: <strong class="text-slate-700">${cant} ${escapeHtml(it.unidad_medida || '')}</strong> &bull; P.U: <strong class="text-slate-700">${pu}</strong>
+            </p>
+          </td>
+          <td class="p-3 align-top">
+            <span class="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700 bg-rose-100/70 border border-rose-200 px-2 py-0.5 rounded-md">
+              <i data-lucide="alert-circle" class="w-3 h-3"></i>
+              <span>Sin vincular</span>
+            </span>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function copyTangoCode(code) {
+      if (!code) return;
+      navigator.clipboard.writeText(code).then(() => {
+        const toast = document.getElementById('tangoCopyToast');
+        if (toast) {
+          toast.textContent = `¡Código ${code} copiado!`;
+          toast.classList.remove('hidden');
+          setTimeout(() => {
+            toast.classList.add('hidden');
+          }, 2000);
+        }
+      }).catch(err => {
+        console.error("Error al copiar portapapeles:", err);
+      });
+    }
+
+    // Ventana Flotante Always-on-top sobre Tango (Document Picture-in-Picture / Popout)
+    async function toggleTangoAlwaysOnTop(enable) {
+      const modal = document.getElementById('modalTangoFloating');
+      const chk = document.getElementById('chkTangoAlwaysOnTop');
+
+      if (enable) {
+        if ('documentPictureInPicture' in window) {
+          try {
+            tangoPipWindow = await window.documentPictureInPicture.requestWindow({
+              width: 580,
+              height: 520,
+            });
+
+            // Copiar hojas de estilo de la app a la ventana PiP
+            [...document.styleSheets].forEach((styleSheet) => {
+              try {
+                const cssRules = [...styleSheet.cssRules].map((rule) => rule.cssText).join('');
+                const style = tangoPipWindow.document.createElement('style');
+                style.textContent = cssRules;
+                tangoPipWindow.document.head.appendChild(style);
+              } catch (e) {
+                const link = tangoPipWindow.document.createElement('link');
+                link.rel = 'stylesheet';
+                link.type = styleSheet.type;
+                link.media = styleSheet.media;
+                link.href = styleSheet.href;
+                tangoPipWindow.document.head.appendChild(link);
+              }
+            });
+
+            // Construir contenido HTML en la ventana PiP
+            const comp = currentInvoiceData?.comprobante || {};
+            const items = currentInvoiceData?.items || [];
+            const linkedItems = items.filter(it => it.match_catalogo && it.match_catalogo.codigo);
+            const unlinkedItems = items.filter(it => !it.match_catalogo || !it.match_catalogo.codigo);
+
+            let rowsHtml = '';
+            linkedItems.forEach(it => {
+              const pu = formatCurrency(it.precio_unitario || 0);
+              rowsHtml += `
+                <tr style="border-bottom: 1px solid #f1f5f9;">
+                  <td style="padding: 8px 12px; vertical-align: top; border-right: 1px solid #f1f5f9; width: 50%;">
+                    <div style="font-weight: 700; color: #0f172a; font-size: 12px;">${escapeHtml(it.factura_descripcion)}</div>
+                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Cant: <b>${it.cantidad || 1}</b> &bull; P.U: <b>${pu}</b></div>
+                  </td>
+                  <td style="padding: 8px 12px; vertical-align: top; width: 50%;">
+                    <div style="margin-bottom: 3px;">
+                      <button onclick="navigator.clipboard.writeText('${escapeQuotes(it.match_catalogo.codigo)}'); this.innerText='¡Copiado!'; setTimeout(()=>this.innerText='${escapeQuotes(it.match_catalogo.codigo)} 📋', 1500);" 
+                              style="font-family: monospace; font-weight: 700; font-size: 12px; background: #e0e7ff; color: #3730a3; border: 1px solid #c7d2fe; padding: 2px 8px; border-radius: 6px; cursor: pointer;">
+                        ${escapeHtml(it.match_catalogo.codigo)} 📋
+                      </button>
+                    </div>
+                    <div style="font-size: 12px; font-weight: 600; color: #1e293b;">${escapeHtml(it.match_catalogo.descripcion)}</div>
+                  </td>
+                </tr>
+              `;
+            });
+
+            unlinkedItems.forEach(it => {
+              rowsHtml += `
+                <tr style="border-bottom: 1px solid #f1f5f9; background: #fff1f2;">
+                  <td style="padding: 8px 12px; vertical-align: top; border-right: 1px solid #f1f5f9; width: 50%;">
+                    <div style="font-weight: 700; color: #0f172a; font-size: 12px;">${escapeHtml(it.factura_descripcion)}</div>
+                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Cant: <b>${it.cantidad || 1}</b></div>
+                  </td>
+                  <td style="padding: 8px 12px; vertical-align: top; width: 50%;">
+                    <span style="font-size: 11px; font-weight: 600; color: #b91c1c; background: #fee2e2; border: 1px solid #fca5a5; padding: 2px 6px; border-radius: 4px;">Sin vincular</span>
+                  </td>
+                </tr>
+              `;
+            });
+
+            tangoPipWindow.document.body.style.margin = '0';
+            tangoPipWindow.document.body.style.fontFamily = 'Inter, system-ui, sans-serif';
+            tangoPipWindow.document.body.style.background = '#f8fafc';
+            tangoPipWindow.document.body.innerHTML = `
+              <div style="display: flex; flex-direction: column; height: 100vh;">
+                <div style="background: #1e293b; color: white; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 700;">
+                  <span>📌 Artículos para Tango (Siempre Visible)</span>
+                  <span style="font-size: 10px; background: rgba(99, 102, 241, 0.3); color: #c7d2fe; padding: 2px 6px; border-radius: 9999px;">${linkedItems.length} vinculados</span>
+                </div>
+                <div style="background: #f1f5f9; padding: 6px 12px; font-size: 11px; color: #475569; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
+                  <span style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(comp.proveedor || 'Proveedor')} &bull; ${escapeHtml(comp.numero || '')}</span>
+                  <span style="color: #64748b;">Clic en código para copiar</span>
+                </div>
+                <div style="flex: 1; overflow-y: auto; background: white;">
+                  <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                    <thead>
+                      <tr style="background: #f8fafc; color: #475569; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0;">
+                        <th style="padding: 6px 12px; width: 50%; border-right: 1px solid #e2e8f0;">Factura (IA)</th>
+                        <th style="padding: 6px 12px; width: 50%;">Tango (Catálogo)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${rowsHtml}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+
+            tangoPipWindow.addEventListener('pagehide', () => {
+              tangoPipWindow = null;
+              if (chk) chk.checked = false;
+              if (modal) modal.classList.remove('hidden');
+            });
+
+            // Ocultar modal interno mientras esté abierta la ventana flotante siempre visible
+            if (modal) modal.classList.add('hidden');
+
+          } catch (err) {
+            console.error("Error abriendo Document Picture-in-Picture:", err);
+            fallbackPopoutTangoWindow();
+          }
+        } else {
+          fallbackPopoutTangoWindow();
+        }
+      } else {
+        if (tangoPipWindow) {
+          try { tangoPipWindow.close(); } catch(e) {}
+          tangoPipWindow = null;
+        }
+        if (modal) modal.classList.remove('hidden');
+      }
+    }
+
+    function fallbackPopoutTangoWindow() {
+      const comp = currentInvoiceData?.comprobante || {};
+      const items = currentInvoiceData?.items || [];
+      const linkedItems = items.filter(it => it.match_catalogo && it.match_catalogo.codigo);
+      const unlinkedItems = items.filter(it => !it.match_catalogo || !it.match_catalogo.codigo);
+
+      let rowsHtml = '';
+      linkedItems.forEach(it => {
+        rowsHtml += `<tr><td style="padding:6px;border-bottom:1px solid #ddd;">${escapeHtml(it.factura_descripcion)}</td><td style="padding:6px;border-bottom:1px solid #ddd;font-weight:bold;color:#3730a3;"><button onclick="navigator.clipboard.writeText('${escapeQuotes(it.match_catalogo.codigo)}'); alert('Copiado: ${escapeQuotes(it.match_catalogo.codigo)}');">${escapeHtml(it.match_catalogo.codigo)}</button> - ${escapeHtml(it.match_catalogo.descripcion)}</td></tr>`;
+      });
+      unlinkedItems.forEach(it => {
+        rowsHtml += `<tr><td style="padding:6px;border-bottom:1px solid #ddd;">${escapeHtml(it.factura_descripcion)}</td><td style="padding:6px;border-bottom:1px solid #ddd;color:red;">Sin vincular</td></tr>`;
+      });
+
+      const pop = window.open('', 'TangoPopout', 'width=560,height=500,left=30,top=100');
+      if (pop) {
+        pop.document.write(`
+          <html><head><title>Artículos para Tango</title><style>body{font-family:sans-serif;margin:10px;font-size:12px;}table{width:100%;border-collapse:collapse;}th{background:#f0f0f0;text-align:left;padding:6px;}button{cursor:pointer;font-weight:bold;}</style></head>
+          <body>
+            <h3>${escapeHtml(comp.proveedor || 'Factura')} (${linkedItems.length} vinculados)</h3>
+            <table><thead><tr><th>Factura (IA)</th><th>Tango (Catálogo)</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+          </body></html>
+        `);
+        pop.document.close();
+      }
+    }
+
+  </script>
+</body>
+</html>
