@@ -799,6 +799,7 @@
     let activeFilter = 'all';
     let activeAssignItemIndex = null;
     let isCloudOnline = false;
+    let apiLogsList = [];
 
     document.getElementById('inputKeyGratuita').value = GEMINI_DEFAULT_KEY;
     document.getElementById('inputKeyPaga').value = GEMINI_BACKUP_KEY;
@@ -884,6 +885,8 @@
           btn.classList.remove('tab-active');
         }
       });
+      if (tab === 'logs') loadLogs();
+      if (tab === 'history') loadUnfoundItems();
       lucide.createIcons();
     }
 
@@ -2235,53 +2238,115 @@ Devuelve ÚNICAMENTE un objeto JSON válido con este formato:
       } catch (err) {}
     }
 
+    function renderLogsTable(logs) {
+      const tbody = document.getElementById('logsTableBody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+
+      if (!logs || logs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-4 text-center text-slate-400 italic">No hay llamadas registradas aún.</td></tr>`;
+        return;
+      }
+
+      logs.forEach(l => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-50 transition";
+        const keyName = l.usedKeyName || 'Clave Gratuita / Principal';
+        const isPaid = keyName.toLowerCase().includes('paga') || keyName.toLowerCase().includes('resguardo');
+        const formattedDate = l.timestamp ? new Date(l.timestamp).toLocaleString() : '-';
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 text-slate-500 font-mono">${formattedDate}</td>
+          <td class="py-2.5 px-3 font-semibold text-slate-800">${escapeHtml(l.documento || '-')}</td>
+          <td class="py-2.5 px-3">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${isPaid ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}">
+              ${escapeHtml(keyName)}
+            </span>
+          </td>
+          <td class="py-2.5 px-3 font-mono">${(l.tokensIn || 0).toLocaleString()}</td>
+          <td class="py-2.5 px-3 font-mono">${(l.tokensOut || 0).toLocaleString()}</td>
+          <td class="py-2.5 px-3 font-mono">${escapeHtml(l.tiempo || '-')}</td>
+          <td class="py-2.5 px-3 font-bold ${(l.status || '200').toString().startsWith('200') ? 'text-emerald-600' : 'text-rose-600'}">${escapeHtml(l.status || '200 OK')}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
     async function logApiCall(entry) {
+      const fullEntry = {
+        id: 'log-' + Date.now(),
+        timestamp: new Date().toISOString(),
+        documento: entry.documento || currentFile?.name || 'Comprobante',
+        usedKeyName: entry.usedKeyName || (currentApiKeyMode === 'paga' ? 'Clave de Resguardo (Paga / Backup)' : 'Clave Gratuita / Principal'),
+        tokensIn: entry.tokensIn || 0,
+        tokensOut: entry.tokensOut || 0,
+        tiempo: entry.tiempo || '-',
+        status: entry.status || '200 OK'
+      };
+
+      // 1. Memoria local
+      apiLogsList.unshift(fullEntry);
+      if (apiLogsList.length > 300) apiLogsList = apiLogsList.slice(0, 300);
+
+      // 2. localStorage inmediato para respuesta ultra-rápida
+      try {
+        localStorage.setItem('lector_facturas_api_logs', JSON.stringify(apiLogsList));
+      } catch (e) {}
+
+      // 3. Renderizar tabla si el usuario está en la pestaña
+      renderLogsTable(apiLogsList);
+
+      // 4. Sincronizar en la nube (Supabase) para persistencia multidispositivo
+      saveSupabaseState({ apiLogs: apiLogsList }).catch(e => {
+        console.warn("Error guardando logs en Supabase:", e);
+      });
+
+      // 5. Fallback opcional a servidor local si estuviera corriendo
       try {
         await fetch('/api/log', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(entry)
+          body: JSON.stringify(fullEntry)
         });
-        loadLogs();
-      } catch (e) {
-        console.warn("No se pudo registrar log:", e);
-      }
+      } catch (e) {}
     }
 
-    async function loadLogs() {
-      try {
-        const res = await fetch('/api/history');
-        const data = await res.json();
-        const tbody = document.getElementById('logsTableBody');
-        tbody.innerHTML = '';
+    async function loadLogs(forceRefresh = false) {
+      // 1. Intentar cargar desde Supabase Cloud
+      const cloudState = await fetchSupabaseState();
+      if (cloudState && Array.isArray(cloudState.apiLogs) && cloudState.apiLogs.length > 0) {
+        apiLogsList = cloudState.apiLogs;
+        try {
+          localStorage.setItem('lector_facturas_api_logs', JSON.stringify(apiLogsList));
+        } catch (e) {}
+        renderLogsTable(apiLogsList);
+        return;
+      }
 
-        const logs = data.logs || [];
-        if (logs.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="7" class="py-4 text-center text-slate-400 italic">No hay llamadas registradas aún.</td></tr>`;
+      // 2. Cache local (localStorage)
+      try {
+        const cached = localStorage.getItem('lector_facturas_api_logs');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            apiLogsList = parsed;
+            renderLogsTable(apiLogsList);
+            return;
+          }
+        }
+      } catch (e) {}
+
+      // 3. Fallback servidor local
+      try {
+        const res = await fetch('/api/history' + (forceRefresh ? '?t=' + Date.now() : ''));
+        const data = await res.json();
+        if (data.success && Array.isArray(data.logs)) {
+          apiLogsList = data.logs;
+          renderLogsTable(apiLogsList);
           return;
         }
+      } catch (e) {}
 
-        logs.forEach(l => {
-          const tr = document.createElement('tr');
-          tr.className = "hover:bg-slate-50 transition";
-          tr.innerHTML = `
-            <td class="py-2.5 px-3 text-slate-500 font-mono">${new Date(l.timestamp).toLocaleString()}</td>
-            <td class="py-2.5 px-3 font-semibold text-slate-800">${escapeHtml(l.documento || '-')}</td>
-            <td class="py-2.5 px-3">
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold ${l.usedKeyName.includes('Paga') ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}">
-                ${escapeHtml(l.usedKeyName || '')}
-              </span>
-            </td>
-            <td class="py-2.5 px-3 font-mono">${l.tokensIn || 0}</td>
-            <td class="py-2.5 px-3 font-mono">${l.tokensOut || 0}</td>
-            <td class="py-2.5 px-3 font-mono">${l.tiempo || '-'}</td>
-            <td class="py-2.5 px-3 font-bold text-emerald-600">${l.status || '200 OK'}</td>
-          `;
-          tbody.appendChild(tr);
-        });
-      } catch (e) {
-        console.error("Error al cargar logs:", e);
-      }
+      renderLogsTable(apiLogsList);
     }
 
     function readFileAsBase64(file) {
