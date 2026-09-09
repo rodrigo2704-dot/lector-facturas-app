@@ -925,10 +925,11 @@
       if (cloudState && Array.isArray(cloudState.catalog) && cloudState.catalog.length > 0) {
         fullCatalog = cloudState.catalog;
         catalogCompactText = fullCatalog.map(it => {
-          const parts = [it.codigo, it.descripcion];
-          if (it.adicional) parts.push(it.adicional);
-          if (it.sinonimo) parts.push(it.sinonimo);
-          return parts.join(' | ');
+          const cod = it.codigo || '-';
+          const desc = it.descripcion || '-';
+          const adic = (it.adicional && it.adicional.trim()) ? it.adicional.trim() : '-';
+          const sin = (it.sinonimo && it.sinonimo.trim()) ? it.sinonimo.trim() : '-';
+          return `${cod} | ${desc} | ${adic} | ${sin}`;
         }).join('\n');
 
         headerElem.innerHTML = `<span class="inline-flex items-center gap-1 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>${fullCatalog.length} artículos (En vivo)</span>`;
@@ -1534,6 +1535,8 @@ ${catalogCompactText}
 CONTEXTO INDUSTRIAL Y REGLAS DE COTEJO:
 Estás clasificando insumos para una fábrica de colchones, sommiers y muebles de madera (química de espumas/polioles, perfiles para muebles/placares, herrajes, tornillería, placas de madera, telas, etc.).
 No te limites a comparar palabras sueltas como un procesador de texto común; debes RAZONAR el producto físico real que se está comprando:
+
+Cada artículo del catálogo cuenta con una descripcion adicional, y un sinonimo, donde se guardan las marcas, nombres y descripciones alternativas con las que los proveedores pueden facturar ese artículo, o simplemente son palabras clave para facilitar la correcta eleccion. Si la vinculacion es dudosa, debes asegurarte de revisar estos datos para encontrar el articulo correcto.
 
 1. DESCOMPOSICIÓN TÉCNICA DE ATRIBUTOS (La Terna Esencial):
    Para cada concepto de la factura, desglosa mentalmente:
