@@ -262,6 +262,27 @@
             <!-- Renglones inyectados dinámicamente -->
           </div>
 
+          <!-- Botón y Visor de Respuesta Cruda de IA (JSON) -->
+          <div class="mt-6 pt-4 border-t border-slate-200">
+            <button onclick="toggleRawAiResponse()" id="btnToggleRawAi" class="w-full py-2.5 px-4 border border-slate-300 hover:border-slate-400 rounded-xl bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-700 flex items-center justify-center gap-2 transition shadow-2xs">
+              <i data-lucide="code-xml" class="w-4 h-4 text-slate-500"></i>
+              <span id="lblToggleRawAi">🔍 Ver Respuesta Cruda de Gemini (JSON)</span>
+            </button>
+            <div id="rawAiResponseContainer" class="hidden mt-3 p-4 bg-slate-900 text-slate-100 rounded-xl text-xs font-mono overflow-auto max-h-[500px] border border-slate-800 shadow-inner">
+              <div class="flex justify-between items-center pb-2 mb-3 border-b border-slate-700">
+                <span class="text-[11px] text-slate-400 font-sans font-medium flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  JSON íntegro devuelto por Gemini (sin procesar):
+                </span>
+                <button onclick="copyRawAiResponse()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-sans flex items-center gap-1.5 border border-slate-600 transition">
+                  <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                  <span id="btnCopyRawText">Copiar JSON</span>
+                </button>
+              </div>
+              <pre id="rawAiResponsePre" class="whitespace-pre-wrap leading-relaxed text-[11px] font-mono select-all text-slate-200"></pre>
+            </div>
+          </div>
+
         </div>
 
       </div>
@@ -800,6 +821,7 @@
     let activeAssignItemIndex = null;
     let isCloudOnline = false;
     let apiLogsList = [];
+    let lastRawAiResponse = '';
 
     document.getElementById('inputKeyGratuita').value = GEMINI_DEFAULT_KEY;
     document.getElementById('inputKeyPaga').value = GEMINI_BACKUP_KEY;
@@ -1604,6 +1626,9 @@ Devuelve ÚNICAMENTE un objeto JSON válido con este formato:
         });
 
         const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+        lastRawAiResponse = rawText;
+        const preRaw = document.getElementById('rawAiResponsePre');
+        if (preRaw) preRaw.textContent = rawText;
         const parsed = parseGeminiJsonResponse(rawText);
 
         currentInvoiceData = parsed;
@@ -1624,6 +1649,39 @@ Devuelve ÚNICAMENTE un objeto JSON válido con este formato:
         processingCard.classList.add('hidden');
         uploadSection.classList.remove('hidden');
       }
+    }
+
+    // Alternar visibilidad de la respuesta cruda de Gemini (JSON)
+    function toggleRawAiResponse() {
+      const container = document.getElementById('rawAiResponseContainer');
+      const lbl = document.getElementById('lblToggleRawAi');
+      if (!container) return;
+      if (container.classList.contains('hidden')) {
+        container.classList.remove('hidden');
+        if (lbl) lbl.textContent = 'Ocultar Respuesta Cruda de Gemini (JSON)';
+        lucide.createIcons();
+      } else {
+        container.classList.add('hidden');
+        if (lbl) lbl.textContent = '🔍 Ver Respuesta Cruda de Gemini (JSON)';
+      }
+    }
+
+    // Copiar JSON crudo al portapapeles
+    function copyRawAiResponse() {
+      if (!lastRawAiResponse) {
+        alert('No hay respuesta cruda disponible para copiar.');
+        return;
+      }
+      navigator.clipboard.writeText(lastRawAiResponse).then(() => {
+        const btnText = document.getElementById('btnCopyRawText');
+        if (btnText) {
+          const orig = btnText.textContent;
+          btnText.textContent = '¡Copiado!';
+          setTimeout(() => { btnText.textContent = orig; }, 2000);
+        }
+      }).catch(err => {
+        console.error('Error al copiar al portapapeles:', err);
+      });
     }
 
     // Visualización de Resultados Original
